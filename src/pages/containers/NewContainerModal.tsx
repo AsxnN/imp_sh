@@ -87,7 +87,7 @@ export function NewContainerModal({ isOpen, onClose, onSave }: Props) {
       <div className="modal-card" style={{ maxWidth: '640px', width: '100%', maxHeight: '90vh' }}>
         <div className="modal-header">
           <div>
-            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', margin: 0, color: 'var(--color-brand-deep)' }}>
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', margin: 0, color: 'var(--color-brand-deep-text)' }}>
               Registrar llegada de contenedor
             </h2>
             <p style={{ margin: '2px 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>

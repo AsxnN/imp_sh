@@ -132,7 +132,7 @@ export function EquationBuilderModal({
               borderRadius: '6px',
               marginBottom: '14px',
               fontSize: '13px',
-              color: 'var(--color-brand-deep)'
+              color: 'var(--color-brand-deep-text)'
             }}
           >
             <div style={{ fontWeight: 600, marginBottom: '4px' }}>
@@ -333,7 +333,7 @@ export function EquationBuilderModal({
                     background: '#F1F5F9',
                     padding: '2px 6px',
                     borderRadius: '4px',
-                    color: 'var(--color-brand-deep)'
+                    color: 'var(--color-brand-deep-text)'
                   }}
                 >
                   {preset.formula}
@@ -545,7 +545,7 @@ export function EquationBuilderModal({
                           padding: '6px 10px',
                           textAlign: 'right',
                           fontWeight: 700,
-                          color: 'var(--color-brand-deep)',
+                          color: 'var(--color-brand-deep-text)',
                           background: 'var(--color-brand-soft)'
                         }}
                       >

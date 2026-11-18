@@ -72,7 +72,7 @@ export function ActivePalletsSubView({
               fontFamily: 'var(--font-display)',
               fontSize: '19px',
               fontWeight: 600,
-              color: 'var(--color-brand-deep)',
+              color: 'var(--color-brand-deep-text)',
               margin: 0
             }}
           >
@@ -198,7 +198,7 @@ export function ActivePalletsSubView({
                           fontFamily: 'monospace',
                           fontSize: '12.5px',
                           fontWeight: 700,
-                          color: 'var(--color-brand-deep)',
+                          color: 'var(--color-brand-deep-text)',
                           background: 'var(--color-brand-soft)',
                           padding: '2px 7px',
                           borderRadius: '4px',

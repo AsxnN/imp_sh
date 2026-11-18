@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { logCatalogChange } from '../../../lib/audit'
+import { MODOS_ACTIVOS, MODO_INFO } from '../empaque'
 import { categoriaRepository } from '../repositories/CategoryRepository'
 import type { Category, ModoManejoCodigo } from '../types'
 
@@ -10,17 +11,13 @@ type Props = {
   onError: (msg: string | null) => void
 }
 
-const MODOS_METADATA: Record<string, { label: string; bg: string; color: string; border: string }> = {
-  PALETIZADO: { label: 'Paletizado estándar', bg: 'var(--color-brand-soft)', color: 'var(--color-brand)', border: 'var(--color-border)' },
-  SERIALIZADO: { label: 'Serializado unitario', bg: 'rgba(188, 121, 31, 0.12)', color: 'var(--color-warning)', border: 'rgba(188, 121, 31, 0.3)' },
-  GRANEL: { label: 'Carga a granel', bg: '#f3e8ff', color: '#6b21a8', border: '#e9d5ff' },
-  LOTE: { label: 'Control por lote', bg: '#fce7f3', color: '#9d174d', border: '#fbcfe8' },
-  LARGO: { label: 'Perfiles / Carga larga', bg: '#ecfdf5', color: '#065f46', border: '#a7f3d0' },
-  PICKING_CAJA: { label: 'Picking por caja', bg: '#f1f5f9', color: '#334155', border: '#cbd5e1' },
-  PESO_VARIABLE: { label: 'Peso variable', bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
-  PERECEDERO: { label: 'Perecedero refrigerado', bg: '#e0f2fe', color: '#0369a1', border: '#bae6fd' },
-  PELIGROSO: { label: 'Material peligroso', bg: 'rgba(179, 64, 42, 0.12)', color: 'var(--color-danger)', border: 'rgba(179, 64, 42, 0.3)' }
-}
+// Solo 3 modos activos (ver empaque.ts). Los demás modos existen en la BD pero están desactivados.
+const MODOS_METADATA: Record<string, { label: string; bg: string; color: string; border: string }> = Object.fromEntries(
+  MODOS_ACTIVOS.map((m) => [
+    m,
+    { label: MODO_INFO[m].label, bg: 'var(--color-brand-soft)', color: 'var(--color-brand)', border: 'var(--color-border)' }
+  ])
+)
 
 export function CategoriesSubView({ categories, loading, onRefresh, onError }: Props) {
   const [nombre, setNombre] = useState('')
@@ -117,8 +114,8 @@ export function CategoriesSubView({ categories, loading, onRefresh, onError }: P
     <section className="panel master-section">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h3>Subvista 1.1 – Categorías y Modos de Manejo</h3>
-          <p className="muted">Administra las agrupaciones del catálogo y su comportamiento logístico operativo.</p>
+          <h3>Categorías</h3>
+          <p className="muted">Cada categoría define el modo de manejo de sus productos: paletizado, por caja o serializado.</p>
         </div>
       </div>
 
@@ -145,21 +142,20 @@ export function CategoriesSubView({ categories, loading, onRefresh, onError }: P
           </label>
 
           <label>
-            Modo de manejo operativo
+            Modo de manejo
             <select
               value={modoManejo}
               onChange={(e) => setModoManejo(e.target.value as ModoManejoCodigo)}
             >
-              <option value="PALETIZADO">Paletizado estándar (Cajas, camadas y puchos con regla de empaque)</option>
-              <option value="SERIALIZADO">Serializado unitario (Maquinaria y equipos con serie/RFID individual)</option>
-              <option value="GRANEL">Carga a granel (Control continuo por peso, tolva o volumen m³)</option>
-              <option value="LOTE">Control por lote y caducidad (FEFO/FIFO con fecha de vencimiento)</option>
-              <option value="LARGO">Perfiles y carga larga (Tuberías, barras y estantería cantilever)</option>
-              <option value="PICKING_CAJA">Picking por caja (Cajas sueltas en estantería ligera sin paleta)</option>
-              <option value="PESO_VARIABLE">Carga de peso variable (Doble unidad: bultos y pesaje en báscula)</option>
-              <option value="PERECEDERO">Perecedero refrigerado (Cadena de frío y control de temperatura)</option>
-              <option value="PELIGROSO">Material peligroso / HazMat (Clasificación IMO/ONU y segregación)</option>
+              {MODOS_ACTIVOS.map((m) => (
+                <option key={m} value={m}>
+                  {MODO_INFO[m].label}
+                </option>
+              ))}
             </select>
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 400 }}>
+              {MODO_INFO[modoManejo as keyof typeof MODO_INFO]?.resumen ?? 'Modo desactivado: elige uno de los 3 modos vigentes.'}
+            </span>
           </label>
         </div>
 
@@ -197,7 +193,7 @@ export function CategoriesSubView({ categories, loading, onRefresh, onError }: P
                 <tr>
                   <th>Nombre</th>
                   <th>Descripción</th>
-                  <th>Modo de Manejo</th>
+                  <th>Modo de manejo</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>

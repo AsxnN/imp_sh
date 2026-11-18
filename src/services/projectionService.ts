@@ -15,117 +15,6 @@ import type {
 export const LOCAL_STORAGE_ORDERS_KEY = 'shalom_projection_orders_v1'
 export const SNAPSHOT_STORAGE_PREFIX = 'shalom_order_snap_'
 
-const DEFAULT_ORDERS: ProjectionOrder[] = [
-  {
-    id_orden: 1,
-    numero_orden: 'IMP-2026-001',
-    descripcion: 'Campaña Suministros Agencias · 1er Semestre',
-    id_plantilla: 1,
-    id_proveedor: 1,
-    estado: 'RECIBIDA',
-    fecha_emision: '2026-08-15',
-    tipo_contenedor: '40FT',
-    volumen_ocupado_m3: 58.5,
-    total_items: 20,
-    total_unidades: 245000,
-    proveedor: {
-      id_proveedor: 1,
-      razon_social: 'Wenzhou Packaging Co. Ltd',
-      nombre: 'Wenzhou Packaging Co. Ltd'
-    },
-    detalles: [
-      { id_producto: 1, cantidad_pedida: 120000, producto: { sku: 'SKU-00001', nombre: 'BOLSA SEG. GRANDE' } },
-      { id_producto: 2, cantidad_pedida: 80000, producto: { sku: 'SKU-00002', nombre: 'BOLSA SEG. MEDIANA' } },
-      { id_producto: 3, cantidad_pedida: 45000, producto: { sku: 'SKU-00003', nombre: 'BOLSA SEG. PEQUEÑO' } }
-    ]
-  },
-  {
-    id_orden: 2,
-    numero_orden: 'IMP-2026-002',
-    descripcion: 'Reposición Rollos Térmicos y Contómetros',
-    id_plantilla: 1,
-    id_proveedor: 1,
-    estado: 'TRANSITO',
-    fecha_emision: '2026-10-10',
-    tipo_contenedor: '40FT',
-    volumen_ocupado_m3: 62.0,
-    total_items: 6,
-    total_unidades: 180000,
-    proveedor: {
-      id_proveedor: 1,
-      razon_social: 'Shenzhen Thermal Paper Tech',
-      nombre: 'Shenzhen Thermal Paper Tech'
-    },
-    detalles: [
-      { id_producto: 8, cantidad_pedida: 180000, producto: { sku: 'SKU-00008', nombre: 'CONTOMETRO' } }
-    ]
-  },
-  {
-    id_orden: 3,
-    numero_orden: 'IMP-2026-003',
-    descripcion: 'Proyección Campaña Verano 2027 (En Simulación)',
-    id_plantilla: 1,
-    id_proveedor: 1,
-    estado: 'BORRADOR',
-    fecha_emision: '2026-11-01',
-    tipo_contenedor: '40FT',
-    volumen_ocupado_m3: 45.0,
-    total_items: 20,
-    total_unidades: 310000,
-    proveedor: {
-      id_proveedor: 1,
-      razon_social: 'Wenzhou Packaging Co. Ltd',
-      nombre: 'Wenzhou Packaging Co. Ltd'
-    }
-  }
-]
-
-// Plantillas predeterminadas de respaldo (idénticas a REPORTE ULTIMO TRIMESTRE.xlsx)
-const DEFAULT_TEMPLATES: ProjectionTemplate[] = [
-  {
-    id_plantilla: 1,
-    codigo: 'IMP_STO',
-    nombre: 'Importaciones y Store',
-    descripcion: 'Modelo dinámico de proyección para suministros de embalaje y paquetería de agencias',
-    lead_time_meses: 3,
-    seguridad_pct: 0.2,
-    factor_compra: 2,
-    dias_por_mes: 30,
-    formula_stock_min: 'PROM_MEN * lead_time_meses',
-    formula_seguridad: 'stock_min * seguridad_pct',
-    formula_stock_min_f: 'stock_min + seguridad',
-    formula_compra: 'stock_redondeado * factor_compra',
-    formula_meses_duracion: '(stock_real * lead_time_meses) / stock_redondeado',
-    formula_stock_redondeado: 'CEIL(STOCK_MIN_F / 1000) * 1000',
-    columnas_meses: ['SEP', 'OCT', 'NOV', 'DIC', 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL'],
-    mes_inicio_promedio: 'SEP',
-    mes_fin_promedio: 'JUL',
-    ignorar_meses_cero: true,
-    activo: true
-  },
-  {
-    id_plantilla: 2,
-    codigo: 'CONST',
-    nombre: 'Construcción y Mantenimiento',
-    descripcion: 'Modelo de reposición para insumos de infraestructura, luminarias y cerámicos',
-    lead_time_meses: 2,
-    seguridad_pct: 0.1,
-    factor_compra: 2,
-    dias_por_mes: 30,
-    formula_stock_min: 'PROM_MEN * lead_time_meses',
-    formula_seguridad: 'stock_min * seguridad_pct',
-    formula_stock_min_f: 'stock_min + seguridad',
-    formula_compra: 'stock_redondeado * factor_compra',
-    formula_meses_duracion: '(stock_real * lead_time_meses) / stock_redondeado',
-    formula_stock_redondeado: 'CEIL(STOCK_MIN_F / 100) * 100',
-    columnas_meses: [],
-    mes_inicio_promedio: null,
-    mes_fin_promedio: null,
-    ignorar_meses_cero: true,
-    activo: true
-  }
-]
-
 // Ítems predeterminados de Importaciones / Store (referencia catálogo)
 export const DEFAULT_IMP_STO_ITEMS: ProjectionItem[] = [
   {
@@ -418,73 +307,26 @@ export const projectionService = {
   },
 
   // 1. Obtener plantillas
+  /** Plantillas: Supabase es la única fuente (sin plantillas de respaldo ni datos del navegador). */
   async getTemplates(): Promise<ProjectionTemplate[]> {
-    try {
-      const { data, error } = await supabase
-        .from('plantilla_proyeccion')
-        .select('*')
-        .eq('activo', true)
-        .order('id_plantilla', { ascending: true })
+    const { data, error } = await supabase
+      .from('plantilla_proyeccion')
+      .select('*')
+      .eq('activo', true)
+      .order('id_plantilla', { ascending: true })
 
-      const rawList =
-        error || !data || data.length === 0 ? DEFAULT_TEMPLATES : (data as ProjectionTemplate[])
-
-      return rawList.map((tpl) => {
-        let customCols: CustomProjectionColumn[] = []
-        if (Array.isArray(tpl.columnas_personalizadas) && tpl.columnas_personalizadas.length > 0) {
-          customCols = tpl.columnas_personalizadas
-        } else {
-          try {
-            const stored = localStorage.getItem(`shalom_custom_columns_${tpl.id_plantilla}`)
-            if (stored) {
-              const parsed = JSON.parse(stored)
-              if (Array.isArray(parsed)) customCols = parsed
-            }
-          } catch {}
-        }
-
-        let months = tpl.columnas_meses || []
-        try {
-          const storedMonths = localStorage.getItem(`shalom_template_months_${tpl.id_plantilla}`)
-          if (storedMonths) {
-            const parsedMonths = JSON.parse(storedMonths)
-            if (Array.isArray(parsedMonths) && parsedMonths.length > 0) {
-              months = parsedMonths
-            }
-          }
-        } catch {}
-
-        return {
-          ...tpl,
-          columnas_meses: months,
-          columnas_personalizadas: customCols
-        }
-      })
-    } catch {
-      return DEFAULT_TEMPLATES.map((tpl) => {
-        let customCols: CustomProjectionColumn[] = []
-        try {
-          const stored = localStorage.getItem(`shalom_custom_columns_${tpl.id_plantilla}`)
-          if (stored) {
-            const parsed = JSON.parse(stored)
-            if (Array.isArray(parsed)) customCols = parsed
-          }
-        } catch {}
-
-        let months = tpl.columnas_meses || []
-        try {
-          const storedMonths = localStorage.getItem(`shalom_template_months_${tpl.id_plantilla}`)
-          if (storedMonths) {
-            const parsedMonths = JSON.parse(storedMonths)
-            if (Array.isArray(parsedMonths) && parsedMonths.length > 0) {
-              months = parsedMonths
-            }
-          }
-        } catch {}
-
-        return { ...tpl, columnas_meses: months, columnas_personalizadas: customCols }
-      })
+    if (error) {
+      console.warn('[proyecciones] Error cargando plantillas:', error.message)
+      return []
     }
+
+    return ((data as ProjectionTemplate[]) ?? []).map((tpl) => ({
+      ...tpl,
+      columnas_meses: tpl.columnas_meses || [],
+      columnas_personalizadas: Array.isArray(tpl.columnas_personalizadas)
+        ? (tpl.columnas_personalizadas as CustomProjectionColumn[])
+        : []
+    }))
   },
 
   // 2. Obtener ítems de una plantilla
@@ -607,7 +449,6 @@ export const projectionService = {
     columns: CustomProjectionColumn[]
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      localStorage.setItem(`shalom_custom_columns_${id_plantilla}`, JSON.stringify(columns))
       const { error } = await supabase
         .from('plantilla_proyeccion')
         .update({
@@ -617,7 +458,7 @@ export const projectionService = {
         .eq('id_plantilla', id_plantilla)
 
       if (error) {
-        console.warn('Aviso de persistencia remota para columnas personalizadas:', error.message)
+        return { success: false, error: `No se pudieron guardar las columnas: ${error.message}` }
       }
       return { success: true }
     } catch (err: any) {
@@ -743,26 +584,17 @@ export const projectionService = {
     }
 
     const updatedMonths = [...safeMonths, cleanMonth]
-    try {
-      const { error } = await supabase
-        .from('plantilla_proyeccion')
-        .update({
-          columnas_meses: updatedMonths,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id_plantilla', id_plantilla)
+    const { error } = await supabase
+      .from('plantilla_proyeccion')
+      .update({
+        columnas_meses: updatedMonths,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id_plantilla', id_plantilla)
 
-      if (error) {
-        console.warn('Supabase update plantilla_proyeccion failed, continuing locally:', error.message)
-      }
-    } catch (err: any) {
-      console.warn('Supabase update plantilla_proyeccion threw exception:', err)
+    if (error) {
+      return { success: false, error: `No se pudo agregar el mes: ${error.message}` }
     }
-
-    try {
-      localStorage.setItem(`shalom_template_months_${id_plantilla}`, JSON.stringify(updatedMonths))
-    } catch {}
-
     return { success: true }
   },
 
@@ -962,283 +794,132 @@ export const projectionService = {
   },
 
   // 10. GESTIÓN INTEGRAL DE ÓRDENES Y PROYECCIONES PERIÓDICAS
+  /**
+   * Órdenes: Supabase es la única fuente de verdad.
+   * (Antes se mezclaban órdenes guardadas en el navegador y órdenes de ejemplo fijas.)
+   * El snapshot de proyección se lee de la BD; la copia local solo se usa si la BD aún no tiene uno.
+   */
   async getOrders(): Promise<ProjectionOrder[]> {
-    try {
-      let data: any = null
-      let error: any = null
-
-      // Intentar consulta con columnas extendidas (snapshot_proyeccion, descripcion, etc.)
-      const extRes = await supabase
-        .from('orden_importacion')
-        .select(`
+    const { data, error } = await supabase
+      .from('orden_importacion')
+      .select(`
+        id_orden,
+        numero_orden,
+        id_proveedor,
+        id_plantilla,
+        estado,
+        fecha_emision,
+        tipo_contenedor,
+        volumen_ocupado_m3,
+        descripcion,
+        total_items,
+        total_unidades,
+        snapshot_proyeccion,
+        proveedor ( id_proveedor, razon_social ),
+        detalle_orden (
+          id_detalle,
           id_orden,
-          numero_orden,
-          id_proveedor,
-          estado,
-          fecha_emision,
-          tipo_contenedor,
-          volumen_ocupado_m3,
-          descripcion,
-          total_items,
-          total_unidades,
-          snapshot_proyeccion,
-          proveedor ( id_proveedor, razon_social ),
-          detalle_orden (
-            id_detalle,
-            id_orden,
+          id_producto,
+          cantidad_pedida,
+          subtotal_peso_kg,
+          subtotal_volumen_m3,
+          producto (
             id_producto,
-            cantidad_pedida,
-            subtotal_peso_kg,
-            subtotal_volumen_m3,
-            producto (
-              id_producto,
-              sku,
-              nombre,
-              regla_empaque (
-                unidades_por_caja,
-                cajas_por_camada,
-                numero_camadas,
-                cajas_por_camita,
-                camitas_por_paleta
-              )
-            )
+            sku,
+            nombre,
+            regla_empaque ( unidades_por_caja, cajas_por_camada, numero_camadas, tipo_empaque )
           )
-        `)
-        .order('fecha_emision', { ascending: false })
-        .order('id_orden', { ascending: false })
+        )
+      `)
+      .order('fecha_emision', { ascending: false })
+      .order('id_orden', { ascending: false })
 
-      if (!extRes.error) {
-        data = extRes.data
-      } else {
-        // Fallback a columnas base si el esquema remoto aún no tiene snapshot_proyeccion (código 42703)
-        const coreRes = await supabase
-          .from('orden_importacion')
-          .select(`
-            id_orden,
-            numero_orden,
-            id_proveedor,
-            estado,
-            fecha_emision,
-            tipo_contenedor,
-            volumen_ocupado_m3,
-            proveedor ( id_proveedor, razon_social ),
-            detalle_orden (
-              id_detalle,
-              id_orden,
-              id_producto,
-              cantidad_pedida,
-              subtotal_peso_kg,
-              subtotal_volumen_m3,
-              producto (
-                id_producto,
-                sku,
-                nombre,
-                regla_empaque (
-                  unidades_por_caja,
-                  cajas_por_camada,
-                  numero_camadas,
-                  cajas_por_camita,
-                  camitas_por_paleta
-                )
-              )
-            )
-          `)
-          .order('fecha_emision', { ascending: false })
-          .order('id_orden', { ascending: false })
-
-        data = coreRes.data
-        error = coreRes.error
-      }
-
-      if (!error && data && data.length > 0) {
-        const formatted: ProjectionOrder[] = data.map((ord: any) => {
-          const rawDetalles = ord.detalle_orden || []
-          const calcItems = ord.total_items || rawDetalles.length
-          const calcUnits =
-            ord.total_unidades ||
-            rawDetalles.reduce((acc: number, d: any) => acc + (Number(d.cantidad_pedida) || 0), 0)
-
-          let sumPaletasCompletas = 0
-          let sumPuchos = 0
-          let sumBultos = 0
-
-          const detalles = rawDetalles.map((d: any) => {
-            const rawRegla = d.producto?.regla_empaque
-            const r = Array.isArray(rawRegla) ? rawRegla[0] : rawRegla
-            const unidCaja = Number(r?.unidades_por_caja) || 50
-            let cajasPal = 48
-            if (r?.cajas_por_camada && r?.numero_camadas) {
-              cajasPal = Number(r.cajas_por_camada) * Number(r.numero_camadas)
-            } else if (r?.cajas_por_camita && r?.camitas_por_paleta) {
-              cajasPal = Number(r.cajas_por_camita) * Number(r.camitas_por_paleta)
-            }
-            cajasPal = Math.max(1, cajasPal)
-            const unidPal = unidCaja * cajasPal
-
-            const cant = Number(d.cantidad_pedida) || 0
-            const cajasTot = Math.ceil(cant / unidCaja)
-            const palCompletas = Math.floor(cant / unidPal)
-            const unidRest = cant % unidPal
-            const cajPucho = unidRest > 0 ? Math.ceil(unidRest / unidCaja) : 0
-            const totBultos = palCompletas + (cajPucho > 0 ? 1 : 0)
-
-            sumPaletasCompletas += palCompletas
-            sumPuchos += (cajPucho > 0 ? 1 : 0)
-            sumBultos += totBultos
-
-            return {
-              id_detalle: d.id_detalle,
-              id_orden: d.id_orden,
-              id_producto: d.id_producto,
-              cantidad_pedida: d.cantidad_pedida,
-              subtotal_peso_kg: d.subtotal_peso_kg,
-              subtotal_volumen_m3: d.subtotal_volumen_m3,
-              desglose_empaque: {
-                unidades_por_caja: unidCaja,
-                cajas_por_paleta: cajasPal,
-                unidades_por_paleta: unidPal,
-                cajas_totales: cajasTot,
-                paletas_completas: palCompletas,
-                cajas_pucho: cajPucho,
-                unidades_pucho: unidRest,
-                total_paletas_bultos: totBultos
-              },
-              producto: d.producto
-                ? {
-                    id_producto: d.producto.id_producto,
-                    sku: d.producto.sku,
-                    nombre: d.producto.nombre,
-                    regla_empaque: r
-                  }
-                : undefined
-            }
-          })
-
-          let finalEstado = (ord.estado as ProjectionOrderStatus) || 'BORRADOR'
-          if (ord.snapshot_proyeccion?.estado_operativo === 'FALTA_APROBACION') {
-            finalEstado = 'FALTA_APROBACION'
-          }
-
-          return {
-            id_orden: ord.id_orden,
-            numero_orden: ord.numero_orden,
-            descripcion: ord.descripcion || `Orden de importación ${ord.numero_orden}`,
-            id_plantilla: ord.id_plantilla || 1,
-            id_proveedor: ord.id_proveedor,
-            estado: finalEstado,
-            fecha_emision: ord.fecha_emision || new Date().toISOString().split('T')[0],
-            tipo_contenedor: ord.tipo_contenedor || '40FT',
-            volumen_ocupado_m3: ord.volumen_ocupado_m3 || null,
-            total_items: calcItems,
-            total_unidades: calcUnits,
-            total_paletas_completas: sumPaletasCompletas,
-            total_puchos: sumPuchos,
-            total_bultos: sumBultos,
-            proveedor: ord.proveedor
-              ? {
-                  id_proveedor: ord.proveedor.id_proveedor,
-                  razon_social: ord.proveedor.razon_social,
-                  nombre: ord.proveedor.razon_social
-                }
-              : null,
-            detalles,
-            snapshot_proyeccion: ord.snapshot_proyeccion || null
-          }
-        })
-
-        // Fusionar robustamente con almacenamiento local y snapshots persistentes
-        const cachedRaw = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY)
-        let cachedList: ProjectionOrder[] = []
-        if (cachedRaw) {
-          try {
-            cachedList = JSON.parse(cachedRaw)
-            if (!Array.isArray(cachedList)) cachedList = []
-          } catch {}
-        }
-
-        for (const item of formatted) {
-          const matched = cachedList.find(
-            (c) => c.id_orden === item.id_orden || c.numero_orden === item.numero_orden
-          )
-          const dedicatedSnapshot = this.getSnapshotFromStorage(item.id_orden, item.numero_orden)
-          const mergedSnapshot =
-            item.snapshot_proyeccion ||
-            dedicatedSnapshot ||
-            matched?.snapshot_proyeccion ||
-            null
-
-          item.snapshot_proyeccion = mergedSnapshot
-
-          if (mergedSnapshot?.estado_operativo) {
-            item.estado = mergedSnapshot.estado_operativo
-          } else if (matched && matched.estado === 'FALTA_APROBACION' && item.estado === 'BORRADOR') {
-            item.estado = 'FALTA_APROBACION'
-          }
-
-          if (mergedSnapshot?.items && Array.isArray(mergedSnapshot.items)) {
-            item.total_items = mergedSnapshot.items.length
-          } else if (matched?.total_items) {
-            item.total_items = matched.total_items
-          }
-
-          if (matched?.total_unidades) {
-            item.total_unidades = matched.total_unidades
-          }
-
-          if (matched?.descripcion && item.descripcion?.startsWith('Orden de importación IMP')) {
-            item.descripcion = matched.descripcion
-          }
-        }
-
-        // Conservar órdenes locales que no estén presentes en el backend
-        const dbIds = new Set(formatted.map((o) => o.id_orden))
-        const dbNums = new Set(formatted.map((o) => o.numero_orden))
-        for (const localOrd of cachedList) {
-          if (!dbIds.has(localOrd.id_orden) && !dbNums.has(localOrd.numero_orden)) {
-            const snap =
-              localOrd.snapshot_proyeccion ||
-              this.getSnapshotFromStorage(localOrd.id_orden, localOrd.numero_orden)
-            formatted.push({
-              ...localOrd,
-              snapshot_proyeccion: snap,
-              estado: snap?.estado_operativo || localOrd.estado,
-              total_items: snap?.items?.length || localOrd.total_items
-            })
-          }
-        }
-
-        localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(formatted))
-        return formatted
-      }
-    } catch (err) {
-      console.warn('Error fetching orders from Supabase, relying on localStorage fallback:', err)
+    if (error) {
+      throw new Error(`No se pudieron cargar las órdenes: ${error.message}`)
     }
 
-    // Fallback con localStorage o semillas por defecto
-    const cached = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY)
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((ord: ProjectionOrder) => {
-            const snap =
-              ord.snapshot_proyeccion ||
-              this.getSnapshotFromStorage(ord.id_orden, ord.numero_orden)
-            return {
-              ...ord,
-              snapshot_proyeccion: snap,
-              estado: snap?.estado_operativo || ord.estado,
-              total_items: snap?.items?.length || ord.total_items
-            }
-          })
-        }
-      } catch {
-        // fallback a semillas
-      }
-    }
+    return ((data as any[]) ?? []).map((ord) => {
+      const rawDetalles = ord.detalle_orden || []
+      let sumPaletasCompletas = 0
+      let sumPuchos = 0
+      let sumBultos = 0
 
-    localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(DEFAULT_ORDERS))
-    return DEFAULT_ORDERS
+      const detalles = rawDetalles.map((d: any) => {
+        const r = Array.isArray(d.producto?.regla_empaque) ? d.producto.regla_empaque[0] : d.producto?.regla_empaque
+        const unidCaja = Math.max(1, Number(r?.unidades_por_caja) || 1)
+        const cajasPal = Math.max(1, (Number(r?.cajas_por_camada) || 1) * (Number(r?.numero_camadas) || 1))
+        const unidPal = unidCaja * cajasPal
+        const cant = Number(d.cantidad_pedida) || 0
+        const palCompletas = Math.floor(cant / unidPal)
+        const unidRest = cant % unidPal
+        const cajPucho = unidRest > 0 ? Math.ceil(unidRest / unidCaja) : 0
+        const totBultos = palCompletas + (cajPucho > 0 ? 1 : 0)
+        sumPaletasCompletas += palCompletas
+        sumPuchos += cajPucho > 0 ? 1 : 0
+        sumBultos += totBultos
+
+        return {
+          id_detalle: d.id_detalle,
+          id_orden: d.id_orden,
+          id_producto: d.id_producto,
+          cantidad_pedida: d.cantidad_pedida,
+          subtotal_peso_kg: d.subtotal_peso_kg,
+          subtotal_volumen_m3: d.subtotal_volumen_m3,
+          desglose_empaque: {
+            unidades_por_caja: unidCaja,
+            cajas_por_paleta: cajasPal,
+            unidades_por_paleta: unidPal,
+            cajas_totales: Math.ceil(cant / unidCaja),
+            paletas_completas: palCompletas,
+            cajas_pucho: cajPucho,
+            unidades_pucho: unidRest,
+            total_paletas_bultos: totBultos
+          },
+          producto: d.producto
+            ? { id_producto: d.producto.id_producto, sku: d.producto.sku, nombre: d.producto.nombre, regla_empaque: r }
+            : undefined
+        }
+      })
+
+      const snapshot =
+        ord.snapshot_proyeccion && Object.keys(ord.snapshot_proyeccion).length > 0 ? ord.snapshot_proyeccion : null
+
+      return {
+        id_orden: ord.id_orden,
+        numero_orden: ord.numero_orden,
+        descripcion: ord.descripcion || `Orden ${ord.numero_orden}`,
+        id_plantilla: ord.id_plantilla ?? null,
+        id_proveedor: ord.id_proveedor,
+        estado: (ord.estado as ProjectionOrderStatus) || 'BORRADOR',
+        fecha_emision: ord.fecha_emision,
+        tipo_contenedor: ord.tipo_contenedor || null,
+        volumen_ocupado_m3: ord.volumen_ocupado_m3 ?? null,
+        total_items: snapshot?.items?.length || ord.total_items || rawDetalles.length,
+        total_unidades:
+          Number(ord.total_unidades) ||
+          rawDetalles.reduce((acc: number, d: any) => acc + (Number(d.cantidad_pedida) || 0), 0),
+        total_paletas_completas: sumPaletasCompletas,
+        total_puchos: sumPuchos,
+        total_bultos: sumBultos,
+        proveedor: ord.proveedor
+          ? { id_proveedor: ord.proveedor.id_proveedor, razon_social: ord.proveedor.razon_social, nombre: ord.proveedor.razon_social }
+          : null,
+        detalles,
+        snapshot_proyeccion: snapshot || null
+      } as ProjectionOrder
+    })
+  },
+
+  /** Siguiente número correlativo del año: IMP-2026-001, IMP-2026-002… (según la BD). */
+  async getNextOrderNumber(): Promise<string> {
+    const year = new Date().getFullYear()
+    const prefix = `IMP-${year}-`
+    const { data } = await supabase.from('orden_importacion').select('numero_orden').ilike('numero_orden', `${prefix}%`)
+    const max = ((data as { numero_orden: string }[]) ?? []).reduce((acc, o) => {
+      const n = parseInt(o.numero_orden.slice(prefix.length), 10)
+      return Number.isFinite(n) && n > acc ? n : acc
+    }, 0)
+    return `${prefix}${String(max + 1).padStart(3, '0')}`
   },
 
   async createOrder(payload: {
@@ -1256,195 +937,90 @@ export const projectionService = {
     if (!cleanNum) {
       return { success: false, error: 'El número de orden es obligatorio.' }
     }
-    const cleanDesc = payload.descripcion?.trim() || `Planificación ${cleanNum}`
-    const plantillaId = payload.id_plantilla || 1
-    const container = payload.tipo_contenedor || '40FT'
-    const status = payload.estado || 'BORRADOR'
-    const emision = payload.fecha_emision || new Date().toISOString().split('T')[0]
 
-    let newId = Date.now()
-
-    try {
-      const extInsert = await supabase
-        .from('orden_importacion')
-        .insert({
-          numero_orden: cleanNum,
-          id_proveedor: payload.id_proveedor || null,
-          tipo_contenedor: container,
-          estado: status,
-          fecha_emision: emision,
-          descripcion: cleanDesc,
-          snapshot_proyeccion: payload.snapshot_proyeccion || {},
-          total_items: payload.items?.length || 0,
-          total_unidades: payload.items?.reduce((s, i) => s + (Number(i.cantidad_pedida) || 0), 0) || 0
-        })
-        .select('id_orden')
-        .single()
-
-      if (!extInsert.error && extInsert.data?.id_orden) {
-        newId = extInsert.data.id_orden
-      } else {
-        const coreInsert = await supabase
-          .from('orden_importacion')
-          .insert({
-            numero_orden: cleanNum,
-            id_proveedor: payload.id_proveedor || null,
-            tipo_contenedor: container,
-            estado: status,
-            fecha_emision: emision
-          })
-          .select('id_orden')
-          .single()
-
-        if (!coreInsert.error && coreInsert.data?.id_orden) {
-          newId = coreInsert.data.id_orden
-        }
-      }
-    } catch (err) {
-      console.warn('Supabase insert failed, continuing with fallback:', err)
-    }
-
-    if (payload.snapshot_proyeccion) {
-      this.saveSnapshotToStorage(newId, cleanNum, payload.snapshot_proyeccion)
-    }
-
-    const newOrder: ProjectionOrder = {
-      id_orden: newId,
+    const insertPayload = {
       numero_orden: cleanNum,
-      descripcion: cleanDesc,
-      id_plantilla: plantillaId,
-      id_proveedor: payload.id_proveedor || null,
-      estado: status,
-      fecha_emision: emision,
-      tipo_contenedor: container,
+      descripcion: payload.descripcion?.trim() || `Orden ${cleanNum}`,
+      id_plantilla: payload.id_plantilla ?? null,
+      id_proveedor: payload.id_proveedor ?? null,
+      tipo_contenedor: payload.tipo_contenedor || '40FT',
+      estado: payload.estado || 'BORRADOR',
+      fecha_emision: payload.fecha_emision || new Date().toISOString().split('T')[0],
+      snapshot_proyeccion: payload.snapshot_proyeccion || {},
       total_items: payload.items?.length || 0,
-      total_unidades: payload.items?.reduce((s, i) => s + (Number(i.cantidad_pedida) || 0), 0) || 0,
-      snapshot_proyeccion: payload.snapshot_proyeccion || null,
-      detalles:
-        payload.items?.map((it, idx) => ({
-          id_detalle: idx + 1,
-          id_orden: newId,
-          id_producto: it.id_producto || idx + 1,
-          cantidad_pedida: it.cantidad_pedida,
-          producto: { sku: `SKU-${idx + 1}`, nombre: it.nombre_producto }
-        })) || []
+      total_unidades: payload.items?.reduce((s, i) => s + (Number(i.cantidad_pedida) || 0), 0) || 0
     }
 
-    const currentOrders = await this.getOrders()
-    const updatedOrders = [newOrder, ...currentOrders.filter((o) => o.numero_orden !== cleanNum)]
-    localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(updatedOrders))
+    const { data, error } = await supabase.from('orden_importacion').insert(insertPayload).select('id_orden').single()
+    if (error || !data) {
+      const msg = error?.code === '23505' ? `La orden ${cleanNum} ya existe.` : error?.message || 'Error desconocido'
+      return { success: false, error: `No se pudo crear la orden: ${msg}` }
+    }
 
-    return { success: true, id_orden: newId, order: newOrder }
+    const order: ProjectionOrder = {
+      id_orden: data.id_orden,
+      numero_orden: cleanNum,
+      descripcion: insertPayload.descripcion,
+      id_plantilla: insertPayload.id_plantilla ?? undefined,
+      id_proveedor: insertPayload.id_proveedor,
+      estado: insertPayload.estado,
+      fecha_emision: insertPayload.fecha_emision,
+      tipo_contenedor: insertPayload.tipo_contenedor,
+      total_items: insertPayload.total_items,
+      total_unidades: insertPayload.total_unidades,
+      snapshot_proyeccion: payload.snapshot_proyeccion || null,
+      detalles: []
+    } as ProjectionOrder
+
+    return { success: true, id_orden: data.id_orden, order }
   },
 
   async updateOrder(
     id_orden: number,
     updates: Partial<ProjectionOrder>
   ): Promise<{ success: boolean; error?: string }> {
-    // 1. Guardar de inmediato en almacenamiento dedicado para garantizar persistencia absoluta
-    if (updates.snapshot_proyeccion) {
-      this.saveSnapshotToStorage(id_orden, updates.numero_orden, updates.snapshot_proyeccion)
+    const dbPayload: Record<string, unknown> = {}
+    if (updates.estado) dbPayload.estado = updates.estado
+    if (updates.tipo_contenedor) dbPayload.tipo_contenedor = updates.tipo_contenedor
+    if (updates.volumen_ocupado_m3 !== undefined) dbPayload.volumen_ocupado_m3 = updates.volumen_ocupado_m3
+    if (updates.fecha_emision) dbPayload.fecha_emision = updates.fecha_emision
+    if (updates.total_items !== undefined) dbPayload.total_items = updates.total_items
+    if (updates.total_unidades !== undefined) dbPayload.total_unidades = updates.total_unidades
+    if (updates.descripcion !== undefined) dbPayload.descripcion = updates.descripcion
+    if (updates.id_plantilla !== undefined) dbPayload.id_plantilla = updates.id_plantilla
+    if (updates.id_proveedor !== undefined) dbPayload.id_proveedor = updates.id_proveedor
+
+    if (updates.snapshot_proyeccion !== undefined) {
+      // Fusión superficial con el snapshot guardado (mismo comportamiento que antes, ahora en la BD)
+      const { data: current } = await supabase
+        .from('orden_importacion')
+        .select('snapshot_proyeccion')
+        .eq('id_orden', id_orden)
+        .maybeSingle()
+      dbPayload.snapshot_proyeccion = updates.snapshot_proyeccion
+        ? { ...((current?.snapshot_proyeccion as object) || {}), ...updates.snapshot_proyeccion }
+        : updates.snapshot_proyeccion
     }
 
-    // 2. Actualizar campos base en Supabase
-    try {
-      const dbPayload: any = {}
-      if (updates.estado) {
-        dbPayload.estado = updates.estado === 'FALTA_APROBACION' ? 'BORRADOR' : updates.estado
-      }
-      if (updates.tipo_contenedor) dbPayload.tipo_contenedor = updates.tipo_contenedor
-      if (updates.volumen_ocupado_m3 !== undefined) dbPayload.volumen_ocupado_m3 = updates.volumen_ocupado_m3
-      if (updates.fecha_emision) dbPayload.fecha_emision = updates.fecha_emision
+    if (Object.keys(dbPayload).length === 0) return { success: true }
 
-      if (Object.keys(dbPayload).length > 0) {
-        await supabase.from('orden_importacion').update(dbPayload).eq('id_orden', id_orden)
-      }
-    } catch (err) {
-      console.warn('Supabase update failed, continuing with localStorage:', err)
+    const { error } = await supabase.from('orden_importacion').update(dbPayload).eq('id_orden', id_orden)
+    if (error) {
+      return { success: false, error: `No se pudo actualizar la orden: ${error.message}` }
     }
-
-    // 3. Actualizar campos extendidos si el esquema remoto cuenta con las columnas
-    try {
-      const extPayload: any = {}
-      if (updates.snapshot_proyeccion !== undefined) extPayload.snapshot_proyeccion = updates.snapshot_proyeccion
-      if (updates.total_items !== undefined) extPayload.total_items = updates.total_items
-      if (updates.total_unidades !== undefined) extPayload.total_unidades = updates.total_unidades
-      if (updates.descripcion !== undefined) extPayload.descripcion = updates.descripcion
-
-      if (Object.keys(extPayload).length > 0) {
-        await supabase.from('orden_importacion').update(extPayload).eq('id_orden', id_orden)
-      }
-    } catch {
-      // Ignorado si la columna no existe en el esquema remoto
-    }
-
-    // 4. Actualizar lista de órdenes en localStorage de forma atómica y segura
-    try {
-      const cachedRaw = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY)
-      let ordersList: ProjectionOrder[] = cachedRaw ? JSON.parse(cachedRaw) : []
-      if (!Array.isArray(ordersList)) ordersList = []
-
-      let found = false
-      ordersList = ordersList.map((ord) => {
-        if (ord.id_orden === id_orden || (updates.numero_orden && ord.numero_orden === updates.numero_orden)) {
-          found = true
-          return {
-            ...ord,
-            ...updates,
-            snapshot_proyeccion: updates.snapshot_proyeccion
-              ? { ...(ord.snapshot_proyeccion || {}), ...updates.snapshot_proyeccion }
-              : ord.snapshot_proyeccion
-          }
-        }
-        return ord
-      })
-
-      if (!found && updates.numero_orden) {
-        ordersList.push({
-          id_orden,
-          numero_orden: updates.numero_orden,
-          descripcion: updates.descripcion || `Orden ${updates.numero_orden}`,
-          id_plantilla: updates.id_plantilla || 1,
-          id_proveedor: updates.id_proveedor || null,
-          estado: updates.estado || 'BORRADOR',
-          fecha_emision: updates.fecha_emision || new Date().toISOString().split('T')[0],
-          tipo_contenedor: updates.tipo_contenedor || '40FT',
-          total_items: updates.total_items || 0,
-          total_unidades: updates.total_unidades || 0,
-          snapshot_proyeccion: updates.snapshot_proyeccion || null,
-          detalles: []
-        } as ProjectionOrder)
-      }
-
-      localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(ordersList))
-    } catch (e) {
-      console.warn('Error saving orders list to localStorage:', e)
-    }
-
     return { success: true }
   },
 
   async deleteOrder(id_orden: number): Promise<{ success: boolean; error?: string }> {
+    const { error: detErr } = await supabase.from('detalle_orden').delete().eq('id_orden', id_orden)
+    if (detErr) return { success: false, error: `No se pudo eliminar el detalle: ${detErr.message}` }
+    const { error } = await supabase.from('orden_importacion').delete().eq('id_orden', id_orden)
+    if (error) return { success: false, error: `No se pudo eliminar la orden: ${error.message}` }
     try {
       localStorage.removeItem(`${SNAPSHOT_STORAGE_PREFIX}${id_orden}`)
-    } catch {}
-
-    try {
-      await supabase.from('detalle_orden').delete().eq('id_orden', id_orden)
-      await supabase.from('orden_importacion').delete().eq('id_orden', id_orden)
-    } catch (err) {
-      console.warn('Supabase delete failed:', err)
+    } catch {
+      // sin efecto si el navegador bloquea el almacenamiento
     }
-
-    try {
-      const cachedRaw = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY)
-      if (cachedRaw) {
-        const currentOrders: ProjectionOrder[] = JSON.parse(cachedRaw)
-        const updatedOrders = currentOrders.filter((ord) => ord.id_orden !== id_orden)
-        localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(updatedOrders))
-      }
-    } catch {}
-
     return { success: true }
   },
 

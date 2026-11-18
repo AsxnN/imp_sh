@@ -150,7 +150,7 @@ export function ContainersPage({ onBack, onOpenReceptions }: Props) {
           >
             ← Volver al resumen
           </button>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
             Control de contenedores y patio
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -233,7 +233,7 @@ export function ContainersPage({ onBack, onOpenReceptions }: Props) {
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-secondary)', display: 'block' }}>
             Límite de evidencias
           </span>
-          <strong style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, color: 'var(--color-brand-deep)', display: 'block', margin: '2px 0' }}>
+          <strong style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, color: 'var(--color-brand-deep-text)', display: 'block', margin: '2px 0' }}>
             10 fotos
           </strong>
           <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
@@ -326,7 +326,7 @@ export function ContainersPage({ onBack, onOpenReceptions }: Props) {
                       <strong style={{ display: 'block', fontSize: '14px', color: 'var(--color-text-primary)' }}>
                         {c.numero_contenedor}
                       </strong>
-                      <span style={{ fontSize: '12px', color: 'var(--color-brand-deep)', fontWeight: 600 }}>
+                      <span style={{ fontSize: '12px', color: 'var(--color-brand-deep-text)', fontWeight: 600 }}>
                         Placa: {c.placa_camion}
                       </span>
                       {c.empresa_transporte && (

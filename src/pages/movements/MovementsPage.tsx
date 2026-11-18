@@ -274,7 +274,7 @@ export function MovementsPage({ onBack }: { onBack: () => void }) {
               fontFamily: 'var(--font-display)',
               fontSize: '30px',
               fontWeight: 600,
-              color: 'var(--color-brand-deep)',
+              color: 'var(--color-brand-deep-text)',
               margin: 0,
               letterSpacing: '0.01em',
               lineHeight: 1.15
@@ -351,7 +351,7 @@ export function MovementsPage({ onBack }: { onBack: () => void }) {
         <div
           style={{
             background: 'var(--color-brand-soft)',
-            color: 'var(--color-brand-deep)',
+            color: 'var(--color-brand-deep-text)',
             border: '1px solid var(--color-brand)',
             borderRadius: '6px',
             padding: '12px 18px',
@@ -372,7 +372,7 @@ export function MovementsPage({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={() => setSuccessMsg(null)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand-deep)', fontSize: '16px', fontWeight: 'bold' }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-brand-deep-text)', fontSize: '16px', fontWeight: 'bold' }}
             aria-label="Cerrar confirmación"
           >
             ✕

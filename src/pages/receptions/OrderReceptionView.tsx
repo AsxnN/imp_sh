@@ -111,7 +111,7 @@ export function OrderReceptionView({
           </button>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h1 className="page-title" style={{ margin: 0, fontSize: '22px', color: 'var(--color-brand-deep)' }}>
+              <h1 className="page-title" style={{ margin: 0, fontSize: '22px', color: 'var(--color-brand-deep-text)' }}>
                 Recepción de orden: {order.numero_orden}
               </h1>
               <span
@@ -263,7 +263,7 @@ export function OrderReceptionView({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep)' }}>
+              <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep-text)' }}>
                 Contenedor en patio (MOD-07)
               </strong>
               {receptionState.contenedor_confirmado && !isChangingContainer ? (
@@ -331,7 +331,7 @@ export function OrderReceptionView({
           >
             <div>
               <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>N° Contenedor:</span>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-brand-deep)' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-brand-deep-text)' }}>
                 {receptionState.numero_contenedor_seleccionado}
               </div>
             </div>
@@ -352,7 +352,7 @@ export function OrderReceptionView({
             <div>
               <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Estado:</span>
               <div style={{ fontSize: '14px', fontWeight: 600, color: isOrderLiquidated ? 'var(--color-success)' : 'var(--color-brand)' }}>
-                {isOrderLiquidated ? 'Descargado en muelle' : 'En descarga activa'}
+                {isOrderLiquidated ? 'Descargado en Operaciones' : 'En descarga activa'}
               </div>
             </div>
           </div>
@@ -424,7 +424,7 @@ export function OrderReceptionView({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
           <div>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
               Productos de la orden (Proyección y avance físico)
             </h2>
             <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '13px' }}>
@@ -519,7 +519,7 @@ export function OrderReceptionView({
                           </div>
                         )}
                       </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep)' }}>
+                      <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep-text)' }}>
                         {receivedUnits.toLocaleString('es-PE')} unid
                         <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 400 }}>
                           ({stats.receivedBoxes} cajas)
@@ -620,7 +620,7 @@ export function OrderReceptionView({
               <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-secondary)' }}>
                 Resumen de liquidación de la orden:
               </span>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-brand-deep)', marginTop: '2px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginTop: '2px' }}>
                 Dictamen: {receptionState.dictamen || 'COMPLETA'} · {totalPalletsScanned} paleta(s) física(s) en almacén · {(receptionState.codigos_liberados?.length || 0)} códigos liberados
               </div>
             </div>

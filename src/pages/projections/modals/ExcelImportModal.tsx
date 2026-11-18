@@ -123,7 +123,7 @@ export function ExcelImportModal({
             <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand)' }}>
               Módulo 06 · Consumos y demanda real
             </span>
-            <h2 className="section-title" style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--color-brand-deep-text)' }}>
               Cargar salidas hacia agencias desde Excel
             </h2>
             <p className="muted" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
@@ -164,7 +164,7 @@ export function ExcelImportModal({
               marginBottom: '16px'
             }}
           >
-            <summary style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', cursor: 'pointer', userSelect: 'none' }}>
+            <summary style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', cursor: 'pointer', userSelect: 'none' }}>
               Estructura requerida del archivo Excel (haz clic para {importResult ? 'ver' : 'ocultar'})
             </summary>
             <p style={{ margin: '8px 0 10px 0', fontSize: '13px', color: 'var(--color-text-secondary)', lineHeight: '1.4' }}>
@@ -224,7 +224,7 @@ export function ExcelImportModal({
             style={{ display: 'none' }}
             onChange={handleFileChange}
           />
-          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
             {file ? file.name : 'Haz clic para seleccionar o arrastra el archivo Excel (.xlsx, .xls, .csv)'}
           </div>
           <p className="muted" style={{ margin: 0, fontSize: '13px' }}>
@@ -301,7 +301,7 @@ export function ExcelImportModal({
                 <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', display: 'block', fontWeight: 600 }}>
                   Meses identificados
                 </span>
-                <strong style={{ fontSize: '24px', color: 'var(--color-brand-deep)', display: 'block', margin: '2px 0' }}>
+                <strong style={{ fontSize: '24px', color: 'var(--color-brand-deep-text)', display: 'block', margin: '2px 0' }}>
                   {importResult.detectedMonths.length}
                 </strong>
                 <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', display: 'block' }}>
@@ -605,7 +605,7 @@ export function ExcelImportModal({
                 background: 'var(--color-brand-soft)',
                 border: '1px solid var(--color-border)',
                 fontSize: '13px',
-                color: 'var(--color-brand-deep)'
+                color: 'var(--color-brand-deep-text)'
               }}
             >
               Al confirmar, los consumos mensuales se incorporarán únicamente a los <strong>{importResult.productosPoseo.length} productos que posees</strong> y el promedio de cada mes se recalculará automáticamente según las salidas hacia agencias.

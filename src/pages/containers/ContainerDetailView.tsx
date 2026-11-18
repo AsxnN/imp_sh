@@ -646,7 +646,7 @@ export function ContainerDetailView({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', margin: 0, color: 'var(--color-brand-deep)', fontWeight: 600 }}>
+              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', margin: 0, color: 'var(--color-brand-deep-text)', fontWeight: 600 }}>
                 Ficha del contenedor {container.numero_contenedor}
               </h1>
               <span
@@ -733,7 +733,7 @@ export function ContainerDetailView({
         {/* ========================================================= */}
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep-text)' }}>
               1. Datos generales del contenedor y transporte
             </h3>
             {!isEditingGeneral && (
@@ -897,7 +897,7 @@ export function ContainerDetailView({
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep)' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep-text)' }}>
                 2. Control de cuadrilla y descarga
               </h3>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
@@ -1219,7 +1219,7 @@ export function ContainerDetailView({
         {/* ========================================================= */}
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep-text)' }}>
               3. Datos del camión, estado y permanencia en patio
             </h3>
             {!isEditingTruck && (
@@ -1371,7 +1371,7 @@ export function ContainerDetailView({
         {/* ========================================================= */}
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '18px' }}>
           <div style={{ marginBottom: '14px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep)' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep-text)' }}>
               4. Registro fotográfico e inspección física y documentaria
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
@@ -1652,7 +1652,7 @@ export function ContainerDetailView({
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <div>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep)' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'var(--color-brand-deep-text)' }}>
                 5. Salida del contenedor y cierre de patio
               </h3>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
@@ -1694,7 +1694,7 @@ export function ContainerDetailView({
               {/* Validación de fotos */}
               {!isPhotosRequirementMet ? (
                 <div style={{ background: 'var(--color-brand-soft)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '12px 16px', marginBottom: '14px', fontSize: '13px' }}>
-                  <strong style={{ color: 'var(--color-brand-deep)' }}>Fotos pendientes para habilitar salida:</strong>
+                  <strong style={{ color: 'var(--color-brand-deep-text)' }}>Fotos pendientes para habilitar salida:</strong>
                   <ul style={{ margin: '6px 0 0', paddingLeft: '20px', fontSize: '12px', color: 'var(--color-text-primary)' }}>
                     {fotosGuia.length < 5 && <li>Guías de remisión: faltan {5 - fotosGuia.length} fotos (mínimo 5 requeridas).</li>}
                     {fotosPrecinto.length < 1 && <li>Foto del precinto: falta 1 foto.</li>}

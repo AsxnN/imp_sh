@@ -109,7 +109,7 @@ export function ReceptionLiquidationView({
       }
     }
 
-    // B. Etiquetas de contingencia / reserva de muelle
+    // B. Etiquetas de contingencia / reserva de Operaciones
     if (packingPlan?.etiquetas_reserva) {
       for (const res of packingPlan.etiquetas_reserva) {
         const cleanUid = res.uid_tag.trim().toUpperCase()
@@ -121,7 +121,7 @@ export function ReceptionLiquidationView({
           rows.push({
             uid_tag: cleanUid,
             producto_sku: received.sku,
-            producto_nombre: 'Excedente rotulado en muelle',
+            producto_nombre: 'Excedente rotulado en Operaciones',
             tipo: received.tipo === 'PUCHO' ? 'Pucho suelto' : 'Paleta completa',
             cajas: received.cajas,
             unidades: received.unidades,
@@ -132,8 +132,8 @@ export function ReceptionLiquidationView({
           rows.push({
             uid_tag: cleanUid,
             producto_sku: 'RESERVA',
-            producto_nombre: 'Etiqueta de contingencia de muelle',
-            tipo: 'Reserva muelle',
+            producto_nombre: 'Etiqueta de contingencia de Operaciones',
+            tipo: 'Reserva Operaciones',
             cajas: 0,
             unidades: 0,
             usado: false,
@@ -210,7 +210,7 @@ export function ReceptionLiquidationView({
           </button>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <h1 className="page-title" style={{ margin: 0, fontSize: '22px', color: 'var(--color-brand-deep)' }}>
+              <h1 className="page-title" style={{ margin: 0, fontSize: '22px', color: 'var(--color-brand-deep-text)' }}>
                 Liquidación y conciliación: Orden {order.numero_orden}
               </h1>
               {isAlreadyLiquidated && (
@@ -300,15 +300,15 @@ export function ReceptionLiquidationView({
                     : 'var(--color-brand)'
               }}
             >
-              Dictamen oficial de muelle:
+              Dictamen oficial de Operaciones:
             </span>
-            <h2 style={{ margin: '4px 0 0 0', fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+            <h2 style={{ margin: '4px 0 0 0', fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
               {dictamen === 'COMPLETA' && 'Recepción completa y conforme'}
               {dictamen === 'FALTANTES' && 'Recepción incompleta con faltantes de proveedor'}
               {dictamen === 'SOBRANTES' && 'Recepción con excedentes / sobrantes'}
             </h2>
             <p style={{ margin: '6px 0 0 0', fontSize: '13px', color: 'var(--color-text-primary)', lineHeight: '1.4' }}>
-              Se proyectaron <strong>{totalProyectado.toLocaleString('es-PE')} unidades</strong>. Se recepcionaron físicamente en muelle <strong>{totalRecepcionado.toLocaleString('es-PE')} unidades</strong>.
+              Se proyectaron <strong>{totalProyectado.toLocaleString('es-PE')} unidades</strong>. Se recepcionaron físicamente en Operaciones <strong>{totalRecepcionado.toLocaleString('es-PE')} unidades</strong>.
               {diferencia !== 0 && (
                 <span style={{ fontWeight: 600, marginLeft: '6px' }}>
                   Diferencia neta: {diferencia > 0 ? `+${diferencia.toLocaleString('es-PE')}` : diferencia.toLocaleString('es-PE')} unidades.
@@ -327,7 +327,7 @@ export function ReceptionLiquidationView({
             }}
           >
             <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Contenedor en garita:</span>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-brand-deep)' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-brand-deep-text)' }}>
               {receptionState.numero_contenedor_seleccionado || 'General'}
             </div>
           </div>
@@ -337,7 +337,7 @@ export function ReceptionLiquidationView({
       {/* 3. Tabla de Auditoría Código por Código */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div>
-          <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+          <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
             Auditoría de códigos correlativos ({codeAuditRows.length} códigos analizados)
           </h2>
           <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '12px' }}>
@@ -462,7 +462,7 @@ export function ReceptionLiquidationView({
             <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
               Códigos no utilizados a liberar
             </span>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-brand-deep)' }}>
+            <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-brand-deep-text)' }}>
               {codigosALiberar.length} códigos
             </div>
             <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
@@ -480,7 +480,7 @@ export function ReceptionLiquidationView({
             placeholder={
               isAlreadyLiquidated
                 ? 'Sin observaciones registradas durante la liquidación.'
-                : 'Ej. Proveedor no embarcó 1 paleta de Film Stretch. Contenedor cerrado conforme en muelle.'
+                : 'Ej. Proveedor no embarcó 1 paleta de Film Stretch. Contenedor cerrado conforme en Operaciones.'
             }
             value={observaciones}
             readOnly={isAlreadyLiquidated}

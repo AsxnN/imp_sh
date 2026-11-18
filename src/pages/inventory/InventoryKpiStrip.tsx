@@ -1,116 +1,66 @@
-type Props = {
-  summary: {
-    totalPaletas: number
-    totalPuchos: number
-    totalCajasPuchos: number
-    totalUnidades: number
-    itemsCount: number
-  }
-  activePalletsCount: number
-  warehouseName?: string
+import { formatoNumero } from '../products/empaque'
+
+export type InventorySummary = {
+  totalUnidades: number
+  productosConStock: number
+  paletasCompletas: number
+  puchos: number
+  cajasCerradas: number
+  cajasAbiertas: number
+  productosPorCaja: number
+  equipos: number
+  volumenM3: number | null
+  capacidadM3: number | null
+  productosSinMedidas: number
 }
 
-export function InventoryKpiStrip({ summary, activePalletsCount, warehouseName }: Props) {
+type Props = {
+  summary: InventorySummary
+}
+
+/** 4 indicadores calculados de la misma fuente que la tabla de existencias (skill_design.md §3.4). */
+export function InventoryKpiStrip({ summary: s }: Props) {
+  const pct = s.volumenM3 !== null && s.capacidadM3 ? Math.min(100, (s.volumenM3 / s.capacidadM3) * 100) : null
+
   return (
     <section
       className="indicator-strip"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-        gap: '14px',
-        marginBottom: '20px'
-      }}
-      aria-label="Indicadores clave de existencias"
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}
+      aria-label="Indicadores de la sede"
     >
       <div className="indicator-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="indicator-label">Paletas completas</span>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '2px 7px',
-              borderRadius: '12px',
-              background: 'var(--color-brand-soft)',
-              color: 'var(--color-brand)',
-              border: '1px solid var(--color-border)'
-            }}
-          >
-            Activas
-          </span>
-        </div>
-        <div className="indicator-value">{summary.totalPaletas}</div>
+        <span className="indicator-label">Unidades en stock</span>
+        <div className="indicator-value">{formatoNumero(s.totalUnidades)}</div>
         <span className="indicator-context">
-          {activePalletsCount} física(s) con chip RFID activo
+          {s.productosConStock} {s.productosConStock === 1 ? 'producto' : 'productos'} con existencias
         </span>
       </div>
 
       <div className="indicator-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="indicator-label">Paletas pucho</span>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '2px 7px',
-              borderRadius: '12px',
-              background: summary.totalPuchos > 0 ? 'rgba(188, 121, 31, 0.1)' : 'var(--color-canvas)',
-              color: summary.totalPuchos > 0 ? 'var(--color-warning)' : 'var(--color-text-secondary)',
-              border: `1px solid ${summary.totalPuchos > 0 ? 'rgba(188, 121, 31, 0.28)' : 'var(--color-border)'}`
-            }}
-          >
-            Cajas sueltas
-          </span>
-        </div>
-        <div className="indicator-value">{summary.totalPuchos}</div>
+        <span className="indicator-label">Paletas con tag RFID</span>
+        <div className="indicator-value">{formatoNumero(s.paletasCompletas + s.puchos)}</div>
         <span className="indicator-context">
-          {summary.totalCajasPuchos} caja(s) pendientes de unificar
+          {s.paletasCompletas} completas · {s.puchos} {s.puchos === 1 ? 'pucho' : 'puchos'}
         </span>
       </div>
 
       <div className="indicator-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="indicator-label">Total unidades en stock</span>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '2px 7px',
-              borderRadius: '12px',
-              background: 'rgba(47, 125, 79, 0.1)',
-              color: 'var(--color-success)',
-              border: '1px solid rgba(47, 125, 79, 0.28)'
-            }}
-          >
-            Disponible
-          </span>
-        </div>
-        <div className="indicator-value">{summary.totalUnidades.toLocaleString()}</div>
+        <span className="indicator-label">Cajas sin paletizar</span>
+        <div className="indicator-value">{formatoNumero(s.cajasCerradas)}</div>
         <span className="indicator-context">
-          Inventario registrado en esta sede
+          cerradas · {s.cajasAbiertas} {s.cajasAbiertas === 1 ? 'abierta' : 'abiertas'} · {s.equipos}{' '}
+          {s.equipos === 1 ? 'equipo' : 'equipos'} por serie
         </span>
       </div>
 
       <div className="indicator-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span className="indicator-label">Artículos con existencias</span>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '2px 7px',
-              borderRadius: '12px',
-              background: 'var(--color-canvas)',
-              color: 'var(--color-text-secondary)',
-              border: '1px solid var(--color-border)'
-            }}
-          >
-            Catálogo
-          </span>
-        </div>
-        <div className="indicator-value">{summary.itemsCount}</div>
+        <span className="indicator-label">Ocupación</span>
+        <div className="indicator-value">{pct !== null ? `${pct.toFixed(1)} %` : '—'}</div>
         <span className="indicator-context">
-          SKUs activos en {warehouseName || 'la sede'}
+          {s.volumenM3 !== null
+            ? `${s.volumenM3.toFixed(2)} de ${s.capacidadM3 ? formatoNumero(s.capacidadM3) : '—'} m³`
+            : 'Sin medidas de empaque para calcular'}
+          {s.productosSinMedidas > 0 && s.volumenM3 !== null && ` · ${s.productosSinMedidas} sin medidas`}
         </span>
       </div>
     </section>

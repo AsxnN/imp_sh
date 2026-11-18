@@ -45,7 +45,7 @@ export function ProjectionFormulaBar({
           padding: '4px 8px',
           borderRadius: '4px',
           background: 'var(--color-brand-soft)',
-          color: 'var(--color-brand-deep)',
+          color: 'var(--color-brand-deep-text)',
           fontWeight: 700,
           fontSize: '13px'
         }}

@@ -38,10 +38,16 @@ export type ProductOption = {
   nombre: string
   modo_manejo: ModoManejoCodigo
   categoria_nombre?: string
-  // Modo PALETIZADO
+  // Modos PALETIZADO y POR CAJA (regla de empaque)
+  tipo_empaque: string
   unidades_por_caja: number
+  /** Empaques por fila (BD: cajas_por_camada) */
+  empaques_por_fila: number
+  /** Filas por paleta (BD: numero_camadas) */
+  filas_por_paleta: number
   cajas_por_paleta: number
   volumen_caja_m3: number | null
+  tiene_regla: boolean
   // Modo SERIALIZADO (Maquinaria y Equipos)
   peso_unitario_kg?: number | null
   largo_cm?: number | null
@@ -61,15 +67,24 @@ export function mapProductToOption(p: Product): ProductOption {
   const cat = Array.isArray(p.categoria) ? p.categoria[0] : p.categoria
   const modo = p.modo_manejo || cat?.modo_manejo || (ps ? 'SERIALIZADO' : 'PALETIZADO')
 
+  const largo = Number((r as any)?.largo_caja_cm) || 0
+  const ancho = Number((r as any)?.ancho_caja_cm) || 0
+  const alto = Number((r as any)?.alto_caja_cm) || 0
+  const volCaja = (r as any)?.volumen_caja_m3 ?? (largo && ancho && alto ? (largo * ancho * alto) / 1000000 : null)
+
   return {
     id_producto: Number(p.id_producto),
     sku: p.sku,
     nombre: p.nombre || '',
     modo_manejo: modo,
     categoria_nombre: cat?.nombre,
+    tipo_empaque: (r as any)?.tipo_empaque || 'CAJA',
     unidades_por_caja: (r as any)?.unidades_por_caja ?? 1,
+    empaques_por_fila: Math.max(1, cCamada),
+    filas_por_paleta: Math.max(1, nCamadas),
     cajas_por_paleta: Math.max(1, cCamada * nCamadas),
-    volumen_caja_m3: (r as any)?.volumen_caja_m3 ?? null,
+    volumen_caja_m3: volCaja !== null ? Number(volCaja) : null,
+    tiene_regla: Boolean(r),
     peso_unitario_kg: ps?.peso_unitario_kg ?? p.peso_unitario_kg ?? null,
     largo_cm: ps?.largo_cm ?? null,
     ancho_cm: ps?.ancho_cm ?? null,
@@ -87,6 +102,12 @@ export type InventoryItem = {
   stock_real: number
   stock_minimo: number
   estado_semaforo: 'VERDE' | 'AMARILLO' | 'ROJO'
+  /** Solo modo Por caja */
+  cajas_cerradas?: number
+  /** Solo modo Por caja: unidades de la única caja abierta */
+  unidades_caja_abierta?: number
+  /** true si la fila no existe en `inventario` y se construyó a partir de las paletas */
+  sin_registro?: boolean
   producto: {
     sku: string
     nombre: string

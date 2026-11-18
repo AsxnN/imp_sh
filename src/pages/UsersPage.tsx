@@ -314,7 +314,7 @@ export function UsersPage({ onBack }: UsersPageProps) {
           <span className="indicator-context">Control total y seguridad</span>
         </div>
         <div className="indicator-card">
-          <span className="indicator-label">Operarios de muelle</span>
+          <span className="indicator-label">Personal de Operaciones</span>
           <span className="indicator-value">{metrics.operarios}</span>
           <span className="indicator-context">Recepción y almacenes</span>
         </div>
@@ -481,7 +481,7 @@ export function UsersPage({ onBack }: UsersPageProps) {
                             display: 'inline-block',
                             padding: '2px 6px',
                             backgroundColor: 'var(--color-brand-soft)',
-                            color: 'var(--color-brand-deep)',
+                            color: 'var(--color-brand-deep-text)',
                             borderRadius: '4px',
                             fontSize: '12px',
                             fontWeight: 600
@@ -592,7 +592,7 @@ export function UsersPage({ onBack }: UsersPageProps) {
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card" style={{ maxWidth: '580px', width: '92%' }}>
             <div className="modal-header">
-              <h2 className="modal-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+              <h2 className="modal-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                 {editingUser ? `Modificar usuario: ${editingUser.nombre_completo}` : 'Registrar nuevo usuario'}
               </h2>
               <button

@@ -219,7 +219,7 @@ export function PalletStickerModal({ isOpen, onClose, data }: Props) {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
               Rótulo de Paleta Térmico
             </h2>
             <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '12px' }}>

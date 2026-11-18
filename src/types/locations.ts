@@ -54,6 +54,8 @@ export type PalletRecord = {
   tipo_paleta: 'COMPLETO' | 'PUCHO'
   cantidad_paquetes: number
   cantidad_actual: number
+  /** Unidades del único empaque abierto (solo pucho) */
+  unidades_sueltas?: number
   estado: 'ACTIVA' | 'VACIA' | 'EXTRAVIADA'
   notas?: string | null
   producto?: {

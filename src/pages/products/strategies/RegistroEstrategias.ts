@@ -1,6 +1,6 @@
 import type { ModoManejoCodigo } from '../types'
 import type { EstrategiaManejo } from './EstrategiaManejo'
-import { paletizadoStrategy } from './PaletizadoStrategy'
+import { paletizadoStrategy, porCajaStrategy } from './PaletizadoStrategy'
 import { serializadoStrategy } from './SerializadoStrategy'
 
 export class RegistroEstrategias {
@@ -8,6 +8,7 @@ export class RegistroEstrategias {
 
   constructor() {
     this.registrar(paletizadoStrategy)
+    this.registrar(porCajaStrategy)
     this.registrar(serializadoStrategy)
   }
 

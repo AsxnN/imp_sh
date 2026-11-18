@@ -269,7 +269,7 @@ export function AuditsPage({ onBack }: Props) {
             </span>
           </div>
 
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
             {activeSession ? `Auditoría en Curso · ${activeSession.almacen_nombre}` : 'Auditorías de Exactitud de Registro (ERI)'}
           </h1>
           <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -290,7 +290,7 @@ export function AuditsPage({ onBack }: Props) {
                 borderRadius: '4px',
                 border: '1px solid var(--color-border)',
                 backgroundColor: 'var(--color-surface)',
-                color: 'var(--color-brand-deep)',
+                color: 'var(--color-brand-deep-text)',
                 fontSize: '14px',
                 fontWeight: 500
               }}
@@ -365,7 +365,7 @@ export function AuditsPage({ onBack }: Props) {
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
                   Progreso por Producto
                 </span>
-                <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-brand-deep)', fontFamily: 'var(--font-display)' }}>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-brand-deep-text)', fontFamily: 'var(--font-display)' }}>
                   {activeSession.productos_auditados} de {activeSession.total_productos} productos
                 </div>
               </div>
@@ -383,7 +383,7 @@ export function AuditsPage({ onBack }: Props) {
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
                   Fecha y Hora
                 </span>
-                <div style={{ fontSize: '14px', color: 'var(--color-brand-deep)', fontWeight: 500 }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-brand-deep-text)', fontWeight: 500 }}>
                   {new Date(activeSession.fecha_inicio).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}
                 </div>
               </div>
@@ -433,7 +433,7 @@ export function AuditsPage({ onBack }: Props) {
                     >
                       ← Volver a lista de productos
                     </button>
-                    <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+                    <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
                       {currentProductItem.sku} — {currentProductItem.nombre}
                     </h2>
                     <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -565,7 +565,7 @@ export function AuditsPage({ onBack }: Props) {
                             </span>
                           </td>
                           <td>
-                            <code style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)' }}>
+                            <code style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
                               {r.uid_tag}
                             </code>
                             {r.codigo_barras && (
@@ -601,7 +601,7 @@ export function AuditsPage({ onBack }: Props) {
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{r.cantidad_paquetes}</td>
                           <td>
                             {r.fecha_lectura ? (
-                              <span style={{ fontSize: '12px', color: 'var(--color-brand-deep)' }}>
+                              <span style={{ fontSize: '12px', color: 'var(--color-brand-deep-text)' }}>
                                 {new Date(r.fecha_lectura).toLocaleTimeString('es-PE')} ({r.metodo_lectura})
                               </span>
                             ) : (
@@ -648,7 +648,7 @@ export function AuditsPage({ onBack }: Props) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span style={{ fontSize: '18px' }}>✅</span>
                       <div>
-                        <strong style={{ color: 'var(--color-brand-deep)', fontSize: '15px' }}>
+                        <strong style={{ color: 'var(--color-brand-deep-text)', fontSize: '15px' }}>
                           Todas las paletas han sido verificadas físicamente.
                         </strong>
                         <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
@@ -699,7 +699,7 @@ export function AuditsPage({ onBack }: Props) {
               }}
             >
               <div style={{ marginBottom: '16px' }}>
-                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+                <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
                   Lista de Productos a Auditar ({auditProducts.length})
                 </h2>
                 <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -762,7 +762,7 @@ export function AuditsPage({ onBack }: Props) {
                           </td>
                           <td>
                             {p.nota_confirmacion ? (
-                              <span style={{ fontSize: '13px', color: 'var(--color-brand-deep)' }}>
+                              <span style={{ fontSize: '13px', color: 'var(--color-brand-deep-text)' }}>
                                 «{p.nota_confirmacion}»
                               </span>
                             ) : (
@@ -793,7 +793,7 @@ export function AuditsPage({ onBack }: Props) {
             <div className="modal-backdrop" role="dialog" aria-modal="true">
               <div className="modal-card" style={{ maxWidth: '500px' }}>
                 <div className="modal-header">
-                  <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+                  <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                     Cerrar y Guardar Sesión de Auditoría
                   </h3>
                   <button
@@ -839,7 +839,7 @@ export function AuditsPage({ onBack }: Props) {
                   )}
 
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                       Observaciones Generales de la Auditoría (Opcional)
                     </label>
                     <textarea
@@ -926,7 +926,7 @@ export function AuditsPage({ onBack }: Props) {
             }}
           >
             <div style={{ marginBottom: '16px' }}>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
                 Historial de Auditorías por Fecha
               </h2>
               <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>

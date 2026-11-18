@@ -1,202 +1,300 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { Warehouse } from '../types'
 
-export function generateWarehousePrefix(name: string): string {
-  if (!name || !name.trim()) return ''
-  const clean = name
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9 ]/g, '')
-    .trim()
-  const words = clean.split(/\s+/).filter(Boolean)
-  if (words.length === 0) return ''
-  if (words.length === 1) {
-    return words[0].substring(0, 3).toUpperCase()
-  }
-  return words.map((w) => w.substring(0, 3).toUpperCase()).join('')
+type TipoAlmacen = 'PRINCIPAL' | 'TIENDA' | 'MERMA'
+
+const TIPOS: { value: TipoAlmacen; label: string; descripcion: string }[] = [
+  { value: 'PRINCIPAL', label: 'Principal', descripcion: 'Centro de distribución: recibe importaciones y guarda paletas en racks.' },
+  { value: 'TIENDA', label: 'Tienda', descripcion: 'Punto de venta o despacho a agencias; maneja menos volumen.' },
+  { value: 'MERMA', label: 'Merma', descripcion: 'Zona de productos dañados, devueltos o por dar de baja.' }
+]
+
+// Palabras que no aportan al prefijo ("Almacén Importaciones" -> IMP, "Tienda Breña" -> BRE)
+const PALABRAS_GENERICAS = new Set(['almacen', 'tienda', 'sede', 'deposito', 'centro', 'de', 'del', 'la', 'el', 'los', 'las', 'y'])
+
+function normalizar(texto: string): string {
+  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ]/g, ' ').trim()
+}
+
+/**
+ * Sugiere un prefijo que no esté en uso: prueba la 1.ª palabra significativa,
+ * luego la 2.ª, luego combinaciones (IMP -> CAL -> IMPC -> IMPO…).
+ */
+export function sugerirPrefijoLibre(name: string, usados: string[]): string {
+  const ocupados = new Set(usados.map((u) => u.toUpperCase()))
+  const palabras = normalizar(name)
+    .replace(/[0-9]/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p) => p.toUpperCase())
+  const signif = palabras.filter((p) => !PALABRAS_GENERICAS.has(p.toLowerCase()))
+  const base = signif.length > 0 ? signif : palabras
+  if (base.length === 0) return ''
+  const [w1, w2 = ''] = base
+  const candidatos = [
+    w1.slice(0, 3),
+    w2.slice(0, 3),
+    w1.slice(0, 3) + w2.slice(0, 1),
+    w1.slice(0, 4),
+    w1.slice(0, 2) + w2.slice(0, 1),
+    w1.slice(0, 5)
+  ].filter((c) => /^[A-Z]{2,5}$/.test(c))
+  return candidatos.find((c) => !ocupados.has(c)) ?? candidatos[0] ?? ''
+}
+
+type Payload = {
+  nombre: string
+  tipo: TipoAlmacen
+  capacidad_m3: number | null
+  activo: boolean
+  prefijo_rfid: string
 }
 
 type Props = {
   isOpen: boolean
   onClose: () => void
   editingWh: Warehouse | null
-  onSaveWarehouse: (payload: {
-    nombre: string
-    tipo: 'PRINCIPAL' | 'TIENDA' | 'MERMA'
-    capacidad_m3: number | null
-    activo: boolean
-    prefijo_rfid: string
-  }) => Promise<void> | void
+  /** Para validar que el nombre y el prefijo no se repitan */
+  warehouses: Warehouse[]
+  onSaveWarehouse: (payload: Payload) => Promise<void> | void
   saving: boolean
 }
 
-export function WarehouseCrudModal({ isOpen, onClose, editingWh, onSaveWarehouse, saving }: Props) {
-  const [whNombre, setWhNombre] = useState('')
-  const [whPrefijo, setWhPrefijo] = useState('')
-  const [whPrefijoCustom, setWhPrefijoCustom] = useState(false)
-  const [whTipo, setWhTipo] = useState<'PRINCIPAL' | 'TIENDA' | 'MERMA'>('PRINCIPAL')
-  const [whCapacidad, setWhCapacidad] = useState('100')
-  const [whActivo, setWhActivo] = useState(true)
+export function WarehouseCrudModal({ isOpen, onClose, editingWh, warehouses, onSaveWarehouse, saving }: Props) {
+  const [nombre, setNombre] = useState('')
+  const [prefijo, setPrefijo] = useState('')
+  const [prefijoManual, setPrefijoManual] = useState(false)
+  const [tipo, setTipo] = useState<TipoAlmacen>('PRINCIPAL')
+  const [capacidad, setCapacidad] = useState('')
+  const [usarMedidas, setUsarMedidas] = useState(false)
+  const [largo, setLargo] = useState('')
+  const [ancho, setAncho] = useState('')
+  const [alto, setAlto] = useState('')
+  const [activo, setActivo] = useState(true)
+  const [intentoGuardar, setIntentoGuardar] = useState(false)
 
   useEffect(() => {
-    if (isOpen) {
-      if (editingWh) {
-        setWhNombre(editingWh.nombre)
-        setWhPrefijo(editingWh.prefijo_rfid || generateWarehousePrefix(editingWh.nombre))
-        setWhPrefijoCustom(Boolean(editingWh.prefijo_rfid))
-        setWhTipo(editingWh.tipo)
-        setWhCapacidad(editingWh.capacidad_m3 ? String(editingWh.capacidad_m3) : '100')
-        setWhActivo(editingWh.activo)
-      } else {
-        setWhNombre('')
-        setWhPrefijo('')
-        setWhPrefijoCustom(false)
-        setWhTipo('PRINCIPAL')
-        setWhCapacidad('200')
-        setWhActivo(true)
-      }
-    }
+    if (!isOpen) return
+    setNombre(editingWh?.nombre ?? '')
+    setPrefijo(editingWh?.prefijo_rfid ?? '')
+    setPrefijoManual(Boolean(editingWh?.prefijo_rfid))
+    setTipo(editingWh?.tipo ?? 'PRINCIPAL')
+    setCapacidad(editingWh?.capacidad_m3 ? String(Number(editingWh.capacidad_m3)) : '')
+    setUsarMedidas(false)
+    setLargo('')
+    setAncho('')
+    setAlto('')
+    setActivo(editingWh?.activo ?? true)
+    setIntentoGuardar(false)
   }, [isOpen, editingWh])
+
+  const otros = useMemo(
+    () => warehouses.filter((w) => w.id_almacen !== editingWh?.id_almacen),
+    [warehouses, editingWh]
+  )
+
+  const prefijosUsados = useMemo(() => otros.map((w) => w.prefijo_rfid ?? '').filter(Boolean), [otros])
+
+  const capacidadCalculada = useMemo(() => {
+    const l = Number(largo) || 0
+    const a = Number(ancho) || 0
+    const h = Number(alto) || 0
+    return l > 0 && a > 0 && h > 0 ? Math.round(l * a * h * 10) / 10 : null
+  }, [largo, ancho, alto])
+
+  const capacidadFinal = usarMedidas ? capacidadCalculada : capacidad ? Number(capacidad) : null
+
+  const errores = useMemo(() => {
+    const e: Partial<Record<'nombre' | 'prefijo' | 'capacidad', string>> = {}
+    const n = nombre.trim()
+    if (!n) e.nombre = 'Escribe el nombre del almacén.'
+    else if (otros.some((w) => w.nombre.trim().toLowerCase() === n.toLowerCase())) e.nombre = 'Ya existe un almacén con ese nombre.'
+
+    if (!/^[A-Z]{2,5}$/.test(prefijo)) e.prefijo = 'Usa de 2 a 5 letras (A-Z), sin números ni espacios.'
+    else if (otros.some((w) => (w.prefijo_rfid ?? '').toUpperCase() === prefijo)) e.prefijo = `El prefijo ${prefijo} ya lo usa otro almacén.`
+
+    if (capacidadFinal !== null && (Number.isNaN(capacidadFinal) || capacidadFinal <= 0)) e.capacidad = 'La capacidad debe ser mayor a 0.'
+    return e
+  }, [nombre, prefijo, capacidadFinal, otros])
+
+  const cambiaPrefijo = Boolean(editingWh?.prefijo_rfid) && editingWh?.prefijo_rfid !== prefijo
 
   if (!isOpen) return null
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    const cleanNombre = whNombre.trim()
-    if (!cleanNombre) return
-
-    const cleanPrefijo = (whPrefijo.trim() || generateWarehousePrefix(cleanNombre)).toUpperCase()
-
+    setIntentoGuardar(true)
+    if (Object.keys(errores).length > 0) return
     void onSaveWarehouse({
-      nombre: cleanNombre,
-      tipo: whTipo,
-      capacidad_m3: whCapacidad ? Math.max(1, Number(whCapacidad)) : null,
-      activo: whActivo,
-      prefijo_rfid: cleanPrefijo
+      nombre: nombre.trim(),
+      tipo,
+      capacidad_m3: capacidadFinal,
+      activo,
+      prefijo_rfid: prefijo
     })
   }
 
+  const mostrar = (campo: keyof typeof errores) => (intentoGuardar || campo === 'prefijo' ? errores[campo] : undefined)
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-window" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-window" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="wh-modal-title" style={{ maxWidth: '640px' }}>
         <div className="modal-header">
           <div>
-            <p className="eyebrow">Gestión de infraestructura</p>
-            <h3>{editingWh ? `Editar Almacén: ${editingWh.nombre}` : 'Registrar Nuevo Almacén o Sede'}</h3>
-            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.86rem' }}>
-              Define las especificaciones de capacidad y propósito logístico del almacén.
+            <h3 id="wh-modal-title">{editingWh ? `Editar almacén` : 'Nuevo almacén'}</h3>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '14px' }}>
+              {editingWh ? editingWh.nombre : 'Registra una sede donde se guardará mercadería.'}
             </p>
           </div>
-          <button className="modal-close-btn" type="button" onClick={onClose}>
+          <button className="modal-close-btn" type="button" onClick={onClose} aria-label="Cerrar">
             ✕
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gap: '16px' }}>
-            <label style={{ display: 'grid', gap: '6px', fontWeight: 700, fontSize: '0.88rem' }}>
-              Nombre del Almacén / Sede
+        <form className="product-form" onSubmit={handleSubmit} noValidate>
+          {/* 1. Identificación */}
+          <fieldset>
+            <legend>1. Identificación</legend>
+            <label>
+              Nombre
               <input
-                type="text"
-                value={whNombre}
+                value={nombre}
                 onChange={(e) => {
-                  const val = e.target.value
-                  setWhNombre(val)
-                  if (!whPrefijoCustom) {
-                    setWhPrefijo(generateWarehousePrefix(val))
-                  }
+                  setNombre(e.target.value)
+                  if (!prefijoManual) setPrefijo(sugerirPrefijoLibre(e.target.value, prefijosUsados))
                 }}
-                placeholder="Ej. Almacén Callao, Tienda Breña, etc."
-                required
+                placeholder="Ej. Importaciones, Tienda Breña, Construcción"
+                aria-invalid={Boolean(mostrar('nombre'))}
+                autoFocus
               />
+              {mostrar('nombre') && <span className="field-error">{mostrar('nombre')}</span>}
             </label>
 
-            <label style={{ display: 'grid', gap: '6px', fontWeight: 700, fontSize: '0.88rem' }}>
-              Código / Prefijo RFID Oficial
+            <label style={{ marginTop: '12px' }}>
+              Prefijo RFID
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <input
-                  type="text"
-                  value={whPrefijo}
-                  maxLength={10}
+                  value={prefijo}
+                  maxLength={5}
                   onChange={(e) => {
-                    setWhPrefijoCustom(true)
-                    setWhPrefijo(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+                    setPrefijoManual(true)
+                    setPrefijo(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))
                   }}
-                  placeholder="Ej. IMP, STO, ABA, CON"
-                  style={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
-                  required
+                  placeholder="IMP"
+                  style={{ maxWidth: '120px', letterSpacing: '1px', fontWeight: 600 }}
+                  aria-invalid={Boolean(nombre && errores.prefijo)}
                 />
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  style={{ padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                  onClick={() => {
-                    setWhPrefijo(generateWarehousePrefix(whNombre))
-                    setWhPrefijoCustom(false)
-                  }}
-                  title="Regenerar con las 3 primeras letras de cada palabra"
-                >
-                  Generar prefijo
-                </button>
+                {prefijoManual && nombre && (
+                  <button
+                    type="button"
+                    className="btn-detail"
+                    onClick={() => {
+                      setPrefijo(sugerirPrefijoLibre(nombre, prefijosUsados))
+                      setPrefijoManual(false)
+                    }}
+                  >
+                    Sugerir desde el nombre
+                  </button>
+                )}
               </div>
-              <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 400 }}>
-                Se genera automáticamente tomando las 3 primeras letras de cada palabra. Se usará para los correlativos
-                de paletas (ej. {whPrefijo || 'ALM'}00001).
-              </span>
+              {nombre && errores.prefijo ? (
+                <span className="field-error">{errores.prefijo}</span>
+              ) : (
+                <span className="field-help">
+                  Las paletas de esta sede se etiquetarán <strong>{prefijo || 'IMP'}00001</strong>, <strong>{prefijo || 'IMP'}00002</strong>… El prefijo no se puede cambiar
+                  una vez emitidas etiquetas.
+                </span>
+              )}
+              {cambiaPrefijo && (
+                <span className="field-error">
+                  Estás cambiando el prefijo {editingWh?.prefijo_rfid} → {prefijo}. Si la sede ya tiene etiquetas emitidas, el sistema lo rechazará.
+                </span>
+              )}
             </label>
+          </fieldset>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              <label style={{ display: 'grid', gap: '6px', fontWeight: 700, fontSize: '0.88rem' }}>
-                Tipo de Almacén
-                <select
-                  value={whTipo}
-                  onChange={(e) => setWhTipo(e.target.value as any)}
-                  style={{
-                    padding: '10px',
-                    borderRadius: '8px',
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text-primary)'
-                  }}
-                  required
-                >
-                  <option value="PRINCIPAL">Principal (Hub logístico / Central)</option>
-                  <option value="TIENDA">Tienda (Punto de venta / Despacho)</option>
-                  <option value="MERMA">Merma (Zona de descarte y averías)</option>
-                </select>
-              </label>
+          {/* 2. Tipo */}
+          <fieldset style={{ marginTop: '16px' }}>
+            <legend>2. Tipo de almacén</legend>
+            <div className="choice-cards" role="radiogroup" aria-label="Tipo de almacén">
+              {TIPOS.map((t) => (
+                <label key={t.value} className={`choice-card ${tipo === t.value ? 'selected' : ''}`}>
+                  <input type="radio" name="tipo-almacen" value={t.value} checked={tipo === t.value} onChange={() => setTipo(t.value)} />
+                  <span className="choice-card-title">{t.label}</span>
+                  <span className="choice-card-text">{t.descripcion}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
-              <label style={{ display: 'grid', gap: '6px', fontWeight: 700, fontSize: '0.88rem' }}>
-                Capacidad Máxima (m³)
-                <input
-                  type="number"
-                  min="1"
-                  step="0.5"
-                  value={whCapacidad}
-                  onChange={(e) => setWhCapacidad(e.target.value)}
-                  placeholder="Ej. 500"
-                  required
-                />
-              </label>
+          {/* 3. Capacidad */}
+          <fieldset style={{ marginTop: '16px' }}>
+            <legend>3. Capacidad (opcional)</legend>
+            <p className="field-help" style={{ margin: '0 0 10px' }}>
+              Se usa para el indicador de ocupación del inventario. Puedes dejarla en blanco y completarla después.
+            </p>
+            <div className="choice-toggle" role="radiogroup" aria-label="Forma de indicar la capacidad">
+              <button type="button" className={!usarMedidas ? 'active' : ''} onClick={() => setUsarMedidas(false)}>
+                Ingresar m³
+              </button>
+              <button type="button" className={usarMedidas ? 'active' : ''} onClick={() => setUsarMedidas(true)}>
+                Calcular con medidas
+              </button>
             </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: '6px 0' }}>
-              <input
-                type="checkbox"
-                checked={whActivo}
-                onChange={(e) => setWhActivo(e.target.checked)}
-                style={{ width: '18px', height: '18px', accentColor: 'var(--color-brand)' }}
-              />
-              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Sede operativa activa</span>
+            {!usarMedidas ? (
+              <label style={{ marginTop: '10px', maxWidth: '220px' }}>
+                Capacidad útil (m³)
+                <input type="number" min="0" step="0.5" value={capacidad} onChange={(e) => setCapacidad(e.target.value)} placeholder="Ej. 1200" />
+              </label>
+            ) : (
+              <div className="number-grid" style={{ marginTop: '10px' }}>
+                <label>
+                  Largo útil (m)
+                  <input type="number" min="0" step="0.1" value={largo} onChange={(e) => setLargo(e.target.value)} />
+                </label>
+                <label>
+                  Ancho útil (m)
+                  <input type="number" min="0" step="0.1" value={ancho} onChange={(e) => setAncho(e.target.value)} />
+                </label>
+                <label>
+                  Alto de estiba (m)
+                  <input type="number" min="0" step="0.1" value={alto} onChange={(e) => setAlto(e.target.value)} />
+                </label>
+              </div>
+            )}
+            {usarMedidas && (
+              <p className="field-help" style={{ margin: '8px 0 0' }}>
+                Capacidad calculada: <strong>{capacidadCalculada !== null ? `${capacidadCalculada.toLocaleString('es-PE')} m³` : '—'}</strong>
+              </p>
+            )}
+            {mostrar('capacidad') && <span className="field-error">{mostrar('capacidad')}</span>}
+          </fieldset>
+
+          {editingWh && (
+            <label className="check" style={{ marginTop: '14px' }}>
+              <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} />
+              Almacén activo (los inactivos no aparecen para ingresar stock)
             </label>
+          )}
+
+          {/* Resumen */}
+          <div className="empaque-jerarquia" style={{ marginTop: '16px' }}>
+            <div className="empaque-total">
+              <span>Resumen</span>
+              <strong>
+                {nombre.trim() || 'Sin nombre'} · {TIPOS.find((t) => t.value === tipo)?.label} · Prefijo {prefijo || '—'} ·{' '}
+                {capacidadFinal ? `${capacidadFinal.toLocaleString('es-PE')} m³` : 'capacidad sin definir'}
+              </strong>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
             <button className="btn-secondary" type="button" onClick={onClose}>
               Cancelar
             </button>
             <button className="btn-primary" type="submit" disabled={saving}>
-              {saving ? 'Guardando almacén…' : editingWh ? 'Actualizar almacén' : 'Crear almacén'}
+              {saving ? 'Guardando…' : editingWh ? 'Guardar cambios' : 'Crear almacén'}
             </button>
           </div>
         </form>

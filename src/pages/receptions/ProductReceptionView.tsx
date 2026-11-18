@@ -70,6 +70,9 @@ export function ProductReceptionView({
     return contingencyTags.filter((t) => !usedTagsSet.has(t.uid_tag.trim().toUpperCase()))
   }, [contingencyTags, usedTagsSet])
 
+  // Regla: la contingencia solo se habilita cuando el lote separado del producto se agotó
+  const contingenciaHabilitada = availableProductTags.length === 0
+
   // 2. Estado del formulario de ingreso de paleta
   const [selectedTagValue, setSelectedTagValue] = useState<string>('')
   const [manualScanInput, setManualScanInput] = useState<string>('')
@@ -134,15 +137,22 @@ export function ProductReceptionView({
       }
     }
 
-    // ¿Es un código de contingencia/reserva de muelle?
+    // ¿Es un código de contingencia/reserva de Operaciones?
     const isContingency = contingencyTags.some(
       (t) => t.uid_tag.trim().toUpperCase() === activeCodeToValidate
     )
     if (isContingency) {
+      if (!contingenciaHabilitada) {
+        const pendientes = availableProductTags.length
+        return {
+          valid: false,
+          reason: `El código [${activeCodeToValidate}] es de contingencia y todavía no se puede usar. Primero termina el lote separado de este producto: ${pendientes === 1 ? 'queda 1 código' : `quedan ${pendientes} códigos`} (siguiente: ${availableProductTags[0].uid_tag}).`
+        }
+      }
       return {
         valid: true,
         type: 'CONTINGENCIA' as const,
-        label: 'Etiqueta de reserva para excedentes de muelle'
+        label: 'Etiqueta de reserva para excedentes de Operaciones'
       }
     }
 
@@ -151,7 +161,7 @@ export function ProductReceptionView({
       valid: false,
       reason: `El código [${activeCodeToValidate}] no pertenece a los códigos separados para este producto ni a las etiquetas de reserva de esta orden.`
     }
-  }, [activeCodeToValidate, usedTagsSet, productSeparatedTags, contingencyTags])
+  }, [activeCodeToValidate, usedTagsSet, productSeparatedTags, contingencyTags, contingenciaHabilitada, availableProductTags])
 
   // Al elegir del desplegable de códigos pendientes
   const handleSelectDropdownCode = (val: string) => {
@@ -245,7 +255,7 @@ export function ProductReceptionView({
   const diferenciaUnits = receivedUnits - projectedUnits
   const pct = projectedUnits > 0 ? Math.min(100, Math.round((receivedUnits / projectedUnits) * 100)) : 0
   const liberatedTagsForProduct = productSeparatedTags.filter((t) => !usedTagsSet.has(t.uid_tag.trim().toUpperCase()))
-  const firstPalletDate = receivedForThisProduct[0]?.fecha_hora || receptionState.fecha_liquidacion || 'Fecha registrada en muelle'
+  const firstPalletDate = receivedForThisProduct[0]?.fecha_hora || receptionState.fecha_liquidacion || 'Fecha registrada en Operaciones'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -274,7 +284,7 @@ export function ProductReceptionView({
             <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand)' }}>
               {isOrderLiquidated ? 'Ficha de auditoría por SKU' : 'Recepción individual por SKU'} · Orden {order.numero_orden}
             </span>
-            <h1 className="page-title" style={{ margin: '2px 0 0 0', fontSize: '20px', color: 'var(--color-brand-deep)' }}>
+            <h1 className="page-title" style={{ margin: '2px 0 0 0', fontSize: '20px', color: 'var(--color-brand-deep-text)' }}>
               [{product?.sku}] {product?.nombre}
             </h1>
           </div>
@@ -306,7 +316,7 @@ export function ProductReceptionView({
                 fontWeight: 600
               }}
             >
-              Contenedor activo: <strong style={{ color: 'var(--color-brand-deep)' }}>{receptionState.numero_contenedor_seleccionado || 'No asignado'}</strong>
+              Contenedor activo: <strong style={{ color: 'var(--color-brand-deep-text)' }}>{receptionState.numero_contenedor_seleccionado || 'No asignado'}</strong>
             </span>
           )}
         </div>
@@ -330,7 +340,7 @@ export function ProductReceptionView({
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 700 }}>
                   Resumen de recepción del SKU
                 </span>
-                <h2 className="section-title" style={{ margin: '2px 0 0 0', fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+                <h2 className="section-title" style={{ margin: '2px 0 0 0', fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
                   1. Balance final de liquidación del producto
                 </h2>
               </div>
@@ -370,7 +380,7 @@ export function ProductReceptionView({
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
                   Cantidad recepcionada
                 </span>
-                <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-brand-deep)', marginTop: '2px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-brand-deep-text)', marginTop: '2px' }}>
                   {receivedUnits.toLocaleString('es-PE')} unid
                 </div>
                 <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
@@ -414,7 +424,7 @@ export function ProductReceptionView({
               borderRadius: '8px'
             }}
           >
-            <h2 className="section-title" style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
               2. Trazabilidad de descarga y logística
             </h2>
 
@@ -453,7 +463,7 @@ export function ProductReceptionView({
                   {firstPalletDate}
                 </div>
                 <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                  Verificado en garita y muelle
+                  Verificado en garita y Operaciones
                 </span>
               </div>
 
@@ -481,7 +491,7 @@ export function ProductReceptionView({
               borderRadius: '8px'
             }}
           >
-            <h2 className="section-title" style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: '0 0 14px 0', fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
               3. Estado de los códigos correlativos de este producto
             </h2>
 
@@ -585,7 +595,7 @@ export function ProductReceptionView({
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
                   Recepcionado físicamente
                 </span>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-brand-deep)', marginTop: '2px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-brand-deep-text)', marginTop: '2px' }}>
                   {receivedUnits.toLocaleString('es-PE')} unid
                   <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 400 }}>
                     {' '}({receivedBoxes} cajas, {receivedForThisProduct.length} paletas)
@@ -632,7 +642,7 @@ export function ProductReceptionView({
             }}
           >
             <div>
-              <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+              <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
                 Asignar código de paleta (Solo códigos previamente separados)
               </h2>
               <p className="muted" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
@@ -702,19 +712,27 @@ export function ProductReceptionView({
                       ))}
                     </optgroup>
                   )}
-                  {availableContingencyTags.length > 0 && (
-                    <optgroup label={`Etiquetas de contingencia / Reserva muelle (${availableContingencyTags.length} disponibles)`}>
+                  {contingenciaHabilitada && availableContingencyTags.length > 0 && (
+                    <optgroup label={`Contingencia (${availableContingencyTags.length} disponibles)`}>
                       {availableContingencyTags.map((t) => (
                         <option key={t.uid_tag} value={t.uid_tag}>
-                          {t.uid_tag} · Reserva de muelle para excedente
+                          {t.uid_tag} · Reserva de Operaciones para excedente
                         </option>
                       ))}
                     </optgroup>
                   )}
                 </select>
-                {availableProductTags.length === 0 && (
-                  <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px', display: 'block' }}>
-                    Todos los códigos reservados para este producto ya han sido utilizados.
+                {contingenciaHabilitada ? (
+                  <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginTop: '4px', display: 'block' }}>
+                    El lote separado de este producto ya se usó completo.
+                    {availableContingencyTags.length > 0
+                      ? ' Si llegan más paletas, usa un código de contingencia.'
+                      : ' Ya no quedan códigos de contingencia en esta orden.'}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginTop: '4px', display: 'block' }}>
+                    Contingencia bloqueada: se habilita cuando termines el lote separado ({availableProductTags.length}{' '}
+                    {availableProductTags.length === 1 ? 'código pendiente' : 'códigos pendientes'}).
                   </span>
                 )}
               </div>
@@ -836,11 +854,11 @@ export function ProductReceptionView({
       {/* 4. Tabla de Historial de Paletas Recepcionadas para este Producto */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div>
-          <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+          <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
             Historial de paletas recepcionadas para este producto ({receivedForThisProduct.length})
           </h2>
           <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '12px' }}>
-            Los códigos listados aquí ya fueron utilizados en muelle, quedaron registrados con el contenedor y se retiraron de la lista de pendientes.
+            Los códigos listados aquí ya fueron utilizados en Operaciones, quedaron registrados con el contenedor y se retiraron de la lista de pendientes.
           </p>
         </div>
 
@@ -893,7 +911,7 @@ export function ProductReceptionView({
                     <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
                       {p.cajas} cajas
                     </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep)' }}>
+                    <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep-text)' }}>
                       {p.unidades.toLocaleString('es-PE')} unid
                     </td>
                     <td>

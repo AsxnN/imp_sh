@@ -4,8 +4,8 @@ import type { EstrategiaManejo } from './EstrategiaManejo'
 
 export class SerializadoStrategy implements EstrategiaManejo<SerializedFormData> {
   readonly codigoModo = 'SERIALIZADO'
-  readonly nombre = 'Serializado unitario'
-  readonly descripcion = 'Equipos y maquinaria identificados unitariamente por número de serie y RFID individual'
+  readonly nombre = 'Serializado'
+  readonly descripcion = 'Maquinaria y equipos identificados por su número de serie de fábrica'
   readonly requiereReglaEmpaque = false
   readonly requiereSerie = true
   readonly permitePuchos = false

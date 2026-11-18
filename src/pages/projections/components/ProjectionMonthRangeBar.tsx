@@ -92,7 +92,7 @@ export function ProjectionMonthRangeBar({
               padding: '4px 10px',
               borderRadius: '4px',
               background: 'var(--color-brand-soft)',
-              color: 'var(--color-brand-deep)',
+              color: 'var(--color-brand-deep-text)',
               fontSize: '13px',
               fontWeight: 600
             }}
@@ -111,7 +111,7 @@ export function ProjectionMonthRangeBar({
               title="Añadir una columna de mes adicional hacia adelante"
               style={{ fontWeight: 600 }}
             >
-              + Agregar mes hacia adelante
+              + Agregar meses
             </button>
           )}
         </div>

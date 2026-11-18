@@ -266,7 +266,7 @@ export function DashboardPage({
             title: 'Paleta recepcionada conforme [IMP00012]',
             desc: 'Film Stretch Manual 50cm (48 cajas) ingresado en celda temporal ALM-CAMPO.',
             time: 'Hace 14 min',
-            badgeText: 'Muelle RFID',
+            badgeText: 'Operaciones RFID',
             badgeVariant: 'brand'
           },
           {
@@ -342,7 +342,7 @@ export function DashboardPage({
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <h1 className="page-title" style={{ margin: 0, fontSize: '24px', color: 'var(--color-brand-deep)' }}>
+            <h1 className="page-title" style={{ margin: 0, fontSize: '24px', color: 'var(--color-brand-deep-text)' }}>
               Centro de operaciones
             </h1>
             <span
@@ -360,7 +360,7 @@ export function DashboardPage({
             </span>
           </div>
           <p className="page-lead" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
-            Resumen transversal de existencias, flujo logístico de muelle y estado de almacenes.
+            Resumen transversal de existencias, flujo logístico de Operaciones y estado de almacenes.
           </p>
         </div>
 
@@ -498,7 +498,7 @@ export function DashboardPage({
             <div className="empty-attention" style={{ textAlign: 'center', padding: '36px 16px' }}>
               <div style={{ fontSize: '20px', color: 'var(--color-success)', marginBottom: '6px' }}>✓</div>
               <strong style={{ display: 'block', fontSize: '13px', color: 'var(--color-text-primary)' }}>
-                Todo el muelle y almacén al día
+                Operaciones y almacén al día
               </strong>
               <p className="muted" style={{ margin: '4px 0 0 0', fontSize: '12px' }}>
                 No hay quiebres de stock ni alertas pendientes para hoy.
@@ -544,11 +544,11 @@ export function DashboardPage({
           aria-label="Actividad reciente en tiempo real"
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
               Actividad reciente en vivo
             </h2>
             <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
-              Muelle y patio
+              Operaciones y patio
             </span>
           </div>
 
@@ -621,7 +621,7 @@ export function DashboardPage({
       <section aria-label="Módulos del sistema">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <div>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
               Módulos del sistema
             </h2>
             <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '12px' }}>

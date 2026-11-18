@@ -1,9 +1,7 @@
-import { useEffect, useState, useMemo, type FormEvent } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import {
   receptionService,
-  type WarehouseOption,
-  type ProductOption,
-  type SupplierOption
+  type WarehouseOption
 } from '../services/receptionService'
 import { containerService } from '../services/containerService'
 import { packingListService, type OrderPackingPlan } from '../services/packingListService'
@@ -21,9 +19,16 @@ interface Props {
   onBack?: () => void
   onNavigateToInventory?: () => void
   initialContainerId?: number | null
+  /** Las órdenes se crean solo en MOD-06 (Órdenes y proyecciones) */
+  onGoToOrders?: () => void
 }
 
-export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavigateToInventory, initialContainerId }: Props) {
+export function ReceptionsPage({
+  onBack: _onBack,
+  onNavigateToInventory: _onNavigateToInventory,
+  initialContainerId,
+  onGoToOrders
+}: Props) {
   // 1. Almacenes y estado global
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([])
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null)
@@ -41,8 +46,6 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
 
   // 3. Datos maestros
   const [orders, setOrders] = useState<ImportOrder[]>([])
-  const [products, setProducts] = useState<ProductOption[]>([])
-  const [suppliers, setSuppliers] = useState<SupplierOption[]>([])
   const [activeContainers, setActiveContainers] = useState<ContainerRecord[]>([])
 
   // 4. Selección activa
@@ -60,15 +63,6 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
   const [orderFilter, setOrderFilter] = useState<'ALL' | 'PENDING' | 'RECEIVED'>('ALL')
   const [searchOrderTerm, setSearchOrderTerm] = useState('')
 
-  // 6. Modal de Nueva Orden Rápida de Importación
-  const [showOrderModal, setShowOrderModal] = useState(false)
-  const [newOrderNumber, setNewOrderNumber] = useState('')
-  const [newOrderSupplierId, setNewOrderSupplierId] = useState<string>('')
-  const [newOrderContainer, setNewOrderContainer] = useState<'20FT' | '40FT' | 'LCL'>('40FT')
-  const [newOrderItems, setNewOrderItems] = useState<Array<{ id_producto: number; cantidad_pedida: number }>>([])
-  const [tempAddProdId, setTempAddProdId] = useState<string>('')
-  const [tempAddQty, setTempAddQty] = useState<number>(100)
-  const [creatingOrder, setCreatingOrder] = useState(false)
 
   // 7. Modal y visualizador de Packing List
   const [orderPackingModal, setOrderPackingModal] = useState<OrderPackingPlan | null>(null)
@@ -96,18 +90,14 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
     setLoading(true)
     setErrorMsg(null)
     try {
-      const [whList, ordList, prodList, supList, contList] = await Promise.all([
+      const [whList, ordList, contList] = await Promise.all([
         receptionService.getWarehouses(),
         receptionService.getImportOrders('ALL'),
-        receptionService.getActiveProducts(),
-        receptionService.getSuppliers(),
         containerService.getActiveContainersInYard()
       ])
 
       setWarehouses(whList)
       setOrders(ordList)
-      setProducts(prodList)
-      setSuppliers(supList)
       setActiveContainers(contList)
 
       if (whList.length > 0 && selectedWarehouseId === null) {
@@ -285,46 +275,6 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
     }
   }
 
-  // Crear orden rápida
-  const handleCreateOrder = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!newOrderNumber.trim()) {
-      alert('Ingrese el número de orden.')
-      return
-    }
-    if (newOrderItems.length === 0) {
-      alert('Debe agregar al menos un producto a la orden.')
-      return
-    }
-
-    setCreatingOrder(true)
-    try {
-      const res = await receptionService.createImportOrder({
-        numero_orden: newOrderNumber.trim(),
-        id_proveedor: newOrderSupplierId ? Number(newOrderSupplierId) : null,
-        tipo_contenedor: newOrderContainer,
-        items: newOrderItems
-      })
-
-      if (!res.success) {
-        alert(res.error || 'Error al crear orden.')
-        return
-      }
-
-      const updatedOrders = await receptionService.getImportOrders('ALL')
-      setOrders(updatedOrders)
-      setShowOrderModal(false)
-      setNewOrderNumber('')
-      setNewOrderItems([])
-
-      setSuccessMsg(`Orden ${newOrderNumber} creada y lista para recibir mercancía en muelle.`)
-    } catch (err: any) {
-      alert(err.message || 'Error al crear orden.')
-    } finally {
-      setCreatingOrder(false)
-    }
-  }
-
   return (
     <div className="workspace" style={{ padding: '24px 32px' }}>
       {/* Mensajes de Alerta y Éxito */}
@@ -387,9 +337,9 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
           >
             <div>
               <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand)' }}>
-                Módulo 04 · Recepciones tácticas en muelle
+                Módulo 04 · Recepciones tácticas en Operaciones
               </span>
-              <h1 className="page-title" style={{ margin: '2px 0 0 0', fontSize: '24px', color: 'var(--color-brand-deep)' }}>
+              <h1 className="page-title" style={{ margin: '2px 0 0 0', fontSize: '24px', color: 'var(--color-brand-deep-text)' }}>
                 Órdenes de importación y embarques
               </h1>
               <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '13px' }}>
@@ -405,14 +355,16 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
                 onSelectWarehouse={(id) => setSelectedWarehouseId(id)}
               />
 
-              <button
-                type="button"
-                className="button primary"
-                onClick={() => setShowOrderModal(true)}
-                style={{ fontWeight: 600 }}
-              >
-                + Nueva orden de importación
-              </button>
+              {onGoToOrders && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={onGoToOrders}
+                  title="Las órdenes se crean y aprueban en Órdenes y proyecciones"
+                >
+                  Ver órdenes y proyecciones
+                </button>
+              )}
             </div>
           </div>
 
@@ -441,7 +393,7 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
                 onClick={() => setOrderFilter('PENDING')}
                 style={{ fontSize: '13px' }}
               >
-                En tránsito / Muelle ({orders.filter((o) => o.estado === 'TRANSITO' || o.estado === 'BORRADOR').length})
+                En tránsito / Operaciones ({orders.filter((o) => o.estado === 'TRANSITO' || o.estado === 'BORRADOR').length})
               </button>
               <button
                 type="button"
@@ -499,7 +451,7 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
                   {filteredOrders.map((ord) => (
                     <tr key={ord.id_orden}>
                       <td>
-                        <strong style={{ color: 'var(--color-brand-deep)', fontSize: '14px' }}>
+                        <strong style={{ color: 'var(--color-brand-deep-text)', fontSize: '14px' }}>
                           {ord.numero_orden}
                         </strong>
                       </td>
@@ -552,7 +504,7 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
                           }}
                         >
                           {ord.estado === 'RECIBIDA'
-                            ? 'Recibida en muelle'
+                            ? 'Recibida en Operaciones'
                             : ord.estado === 'TRANSITO'
                             ? 'En tránsito'
                             : 'Borrador'}
@@ -628,206 +580,13 @@ export function ReceptionsPage({ onBack: _onBack, onNavigateToInventory: _onNavi
         />
       )}
 
-      {/* MODAL 1: Nueva Orden Rápida de Importación */}
-      {showOrderModal && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal-card" style={{ maxWidth: '640px', width: '90%' }}>
-            <form onSubmit={handleCreateOrder}>
-              <div className="modal-header">
-                <h2 className="modal-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
-                  Nueva orden de importación
-                </h2>
-                <button
-                  type="button"
-                  className="modal-close-btn"
-                  onClick={() => setShowOrderModal(false)}
-                  aria-label="Cerrar ventana"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '16px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '4px' }}>
-                      Número de orden *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: IMP-2026-005"
-                      value={newOrderNumber}
-                      onChange={(e) => setNewOrderNumber(e.target.value)}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '6px',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text-primary)',
-                        fontSize: '13px'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '4px' }}>
-                      Proveedor
-                    </label>
-                    <select
-                      value={newOrderSupplierId}
-                      onChange={(e) => setNewOrderSupplierId(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '6px',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text-primary)',
-                        fontSize: '13px'
-                      }}
-                    >
-                      <option value="">-- Proveedor genérico --</option>
-                      {suppliers.map((s) => (
-                        <option key={s.id_proveedor} value={s.id_proveedor}>
-                          {s.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '4px' }}>
-                    Tipo de contenedor
-                  </label>
-                  <select
-                    value={newOrderContainer}
-                    onChange={(e) => setNewOrderContainer(e.target.value as any)}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '6px',
-                      background: 'var(--color-surface)',
-                      color: 'var(--color-text-primary)',
-                      fontSize: '13px'
-                    }}
-                  >
-                    <option value="40FT">40FT (Estándar marítimo - ~67 m³)</option>
-                    <option value="20FT">20FT (Contenedor corto - ~33 m³)</option>
-                    <option value="LCL">LCL (Carga suelta consolidada)</option>
-                  </select>
-                </div>
-
-                {/* Agregar Productos a la Orden */}
-                <div style={{ border: '1px solid var(--color-border)', borderRadius: '6px', padding: '12px', background: 'var(--color-canvas)' }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: '8px' }}>
-                    Productos de la orden ({newOrderItems.length})
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <select
-                      value={tempAddProdId}
-                      onChange={(e) => setTempAddProdId(e.target.value)}
-                      style={{ flex: 1, padding: '7px 10px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
-                    >
-                      <option value="">-- Seleccionar producto --</option>
-                      {products.map((p) => (
-                        <option key={p.id_producto} value={p.id_producto}>
-                          {p.sku} - {p.nombre}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      placeholder="Cantidad"
-                      value={tempAddQty}
-                      onChange={(e) => setTempAddQty(parseInt(e.target.value, 10) || 1)}
-                      style={{ width: '90px', padding: '7px 8px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
-                    />
-                    <button
-                      type="button"
-                      className="button secondary"
-                      onClick={() => {
-                        if (!tempAddProdId) return
-                        const pId = Number(tempAddProdId)
-                        setNewOrderItems((prev) => {
-                          const existing = prev.find((item) => item.id_producto === pId)
-                          if (existing) {
-                            return prev.map((item) =>
-                              item.id_producto === pId
-                                ? { ...item, cantidad_pedida: item.cantidad_pedida + tempAddQty }
-                                : item
-                            )
-                          }
-                          return [...prev, { id_producto: pId, cantidad_pedida: tempAddQty }]
-                        })
-                        setTempAddProdId('')
-                        setTempAddQty(100)
-                      }}
-                    >
-                      + Agregar
-                    </button>
-                  </div>
-
-                  {newOrderItems.length > 0 && (
-                    <div style={{ marginTop: '10px', maxHeight: '140px', overflowY: 'auto' }}>
-                      {newOrderItems.map((item, idx) => {
-                        const pInfo = products.find((p) => p.id_producto === item.id_producto)
-                        return (
-                          <div
-                            key={idx}
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              padding: '4px 8px',
-                              background: 'var(--color-surface)',
-                              borderRadius: '4px',
-                              fontSize: '12px',
-                              marginBottom: '4px',
-                              border: '1px solid var(--color-border)'
-                            }}
-                          >
-                            <span>
-                              <strong>{pInfo?.sku || `SKU-${item.id_producto}`}</strong> · {pInfo?.nombre}: {item.cantidad_pedida} unid
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setNewOrderItems((prev) => prev.filter((_, i) => i !== idx))}
-                              style={{ background: 'none', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontWeight: 700 }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-                <button type="button" className="button secondary" onClick={() => setShowOrderModal(false)} disabled={creatingOrder}>
-                  Cancelar
-                </button>
-                <button type="submit" className="button primary" disabled={creatingOrder || newOrderItems.length === 0}>
-                  {creatingOrder ? 'Creando orden...' : 'Crear orden'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* MODAL 2: Visor de Packing List y Rótulos */}
       {orderPackingModal && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card" style={{ maxWidth: '820px', width: '92%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
             <div className="modal-header">
               <div>
-                <h2 className="modal-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+                <h2 className="modal-title" style={{ margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                   Packing list oficial: {orderPackingModal.numero_orden}
                 </h2>
                 <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>

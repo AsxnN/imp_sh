@@ -13,16 +13,9 @@ interface WarehouseSelectorBarProps {
   warehouses: Warehouse[]
   selectedWarehouseId: number | null
   onSelectWarehouse: (warehouseId: number) => void
-  onNewWarehouse: () => void
-  onEditWarehouse: (warehouse: Warehouse) => void
-  summary: {
-    totalVolumenM3: number
-    pctOcupado: number
-    totalPaletas: number
-    totalPuchos: number
-    totalUnidades: number
-    itemsCount: number
-  }
+  /** Solo se muestran los accesos de configuración si se proveen (pestaña Configuración) */
+  onNewWarehouse?: () => void
+  onEditWarehouse?: (warehouse: Warehouse) => void
 }
 
 export function WarehouseSelectorBar({
@@ -30,8 +23,7 @@ export function WarehouseSelectorBar({
   selectedWarehouseId,
   onSelectWarehouse,
   onNewWarehouse,
-  onEditWarehouse,
-  summary
+  onEditWarehouse
 }: WarehouseSelectorBarProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -217,7 +209,7 @@ export function WarehouseSelectorBar({
               fontFamily: 'var(--font-display)',
               fontSize: '22px',
               fontWeight: 600,
-              color: 'var(--color-brand-deep)',
+              color: 'var(--color-brand-deep-text)',
               letterSpacing: '-0.01em',
               lineHeight: 1.2
             }}
@@ -225,38 +217,7 @@ export function WarehouseSelectorBar({
             {selectedWarehouse ? selectedWarehouse.nombre : 'Sin almacén seleccionado'}
           </h3>
 
-          {/* Medidor de ocupación de la sede */}
-          {selectedWarehouse && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <div
-                style={{
-                  width: '180px',
-                  height: '5px',
-                  background: 'var(--color-border)',
-                  borderRadius: '3px',
-                  overflow: 'hidden'
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.min(100, summary.pctOcupado)}%`,
-                    height: '100%',
-                    background: summary.pctOcupado > 85 ? 'var(--color-danger)' : 'var(--color-brand)',
-                    transition: 'width 0.3s ease'
-                  }}
-                />
-              </div>
-              <span style={{ fontSize: '12.5px', color: 'var(--color-text-secondary)' }}>
-                Capacidad:{' '}
-                <strong style={{ color: 'var(--color-text-primary)' }}>
-                  {summary.totalVolumenM3} m³
-                </strong>{' '}
-                /{' '}
-                {selectedWarehouse.capacidad_m3 ? `${selectedWarehouse.capacidad_m3} m³` : '500 m³'}{' '}
-                ({summary.pctOcupado}%)
-              </span>
-            </div>
-          )}
+          {/* La ocupación se muestra una sola vez, en la tira de indicadores */}
         </div>
 
         {/* Acciones de selección y configuración de sede */}
@@ -602,28 +563,30 @@ export function WarehouseSelectorBar({
                   <span style={{ color: 'var(--color-text-secondary)' }}>
                     {filteredWarehouses.length} de {warehouses.length} sedes disponibles
                   </span>
-                  <button
-                    type="button"
-                    className="btn-detail"
-                    onClick={() => {
-                      setIsOpen(false)
-                      onNewWarehouse()
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '12px',
-                      color: 'var(--color-brand)'
-                    }}
-                  >
-                    + Registrar nueva sede
-                  </button>
+                  {onNewWarehouse && (
+                    <button
+                      type="button"
+                      className="btn-detail"
+                      onClick={() => {
+                        setIsOpen(false)
+                        onNewWarehouse()
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '12px',
+                        color: 'var(--color-brand)'
+                      }}
+                    >
+                      + Registrar nueva sede
+                    </button>
+                  )}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Configurar sede actual */}
-          {selectedWarehouse && (
+          {/* Configurar sede actual (solo si la vista lo habilita) */}
+          {selectedWarehouse && onEditWarehouse && (
             <button
               type="button"
               className="btn-secondary"
@@ -634,17 +597,6 @@ export function WarehouseSelectorBar({
               Configurar sede
             </button>
           )}
-
-          {/* Crear nueva sede */}
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onNewWarehouse}
-            style={{ fontSize: '13px', padding: '8px 12px' }}
-            title="Crear un nuevo almacén, tienda o área de merma"
-          >
-            + Nueva sede
-          </button>
         </div>
       </div>
     </div>

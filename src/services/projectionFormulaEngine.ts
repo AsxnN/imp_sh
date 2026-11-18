@@ -654,11 +654,19 @@ export const projectionFormulaEngine = {
       diasEnteros = 0
     }
 
-    const textoDuracion = `${mesesEnteros} mes(es) y ${diasEnteros} día(s)`
+    // Casos sin dato: sin stock no hay cobertura; sin consumo el stock no se agota
+    const sinStock = stockReal <= 0
+    const sinConsumo = !sinStock && promedioFinal <= 0
+
+    const textoDuracion = sinStock
+      ? 'Sin stock'
+      : sinConsumo
+      ? 'Sin consumo'
+      : `${mesesEnteros} mes(es) y ${diasEnteros} día(s)`
 
     const diasTotalesMilis = Math.max(0, mesesDuracion) * diasPorMes * 24 * 60 * 60 * 1000
     const fechaQuiebreObj = new Date(Date.now() + diasTotalesMilis)
-    const fechaQuiebre = isNaN(fechaQuiebreObj.getTime())
+    const fechaQuiebre = sinConsumo || isNaN(fechaQuiebreObj.getTime())
       ? '—'
       : fechaQuiebreObj.toLocaleDateString('es-PE', {
           day: '2-digit',
@@ -668,7 +676,9 @@ export const projectionFormulaEngine = {
 
     // 10. Estado Crítico / Semáforo operativo
     let estadoCritico: CriticalStatus = 'OPTIMO'
-    if (stockReal <= 0 || mesesDuracion < 1) {
+    if (sinConsumo) {
+      estadoCritico = 'OPTIMO' // Sin salidas registradas: no hay riesgo de quiebre
+    } else if (sinStock || mesesDuracion < 1) {
       estadoCritico = 'CRITICO' // 🔴 Menos de 1 mes de stock (quiebre inminente)
     } else if (mesesDuracion <= leadTime) {
       estadoCritico = 'REORDEN' // 🟡 Ventana de pedido (tarda leadTime meses en llegar)
@@ -695,7 +705,9 @@ export const projectionFormulaEngine = {
       texto_duracion: textoDuracion,
       fecha_quiebre: fechaQuiebre,
       estado_critico: estadoCritico,
-      valores_personalizados: valoresPersonalizados
+      valores_personalizados: valoresPersonalizados,
+      promedio_manual: item.promedio_manual ?? null,
+      stock_min_redondeado_manual: item.stock_redondeado_manual ?? null
     }
   },
 

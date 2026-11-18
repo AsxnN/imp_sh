@@ -99,6 +99,7 @@ export type ProductDetailed = {
   numero_camadas: number | null
   cajas_por_paleta: number | null
   unidades_por_paleta: number | null
+  tipo_empaque?: string | null
   empaque_permite_puchos: boolean | null
   notas_armado: string | null
   imagen_armado_path: string | null
@@ -131,6 +132,7 @@ export type Rule = {
   id_empaque?: number | string
   id_producto?: number | string
   unidades_por_caja: number
+  tipo_empaque?: string | null
   cajas_por_camada?: number
   numero_camadas?: number
   cajas_por_camita?: number
@@ -197,6 +199,7 @@ export type ProductFormData = {
 }
 
 export type PackingFormData = {
+  tipo_empaque: string
   unidades_por_caja: string
   cajas_por_camada: string
   numero_camadas: string

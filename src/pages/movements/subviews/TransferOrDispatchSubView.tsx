@@ -112,7 +112,7 @@ export function TransferOrDispatchSubView({
                 fontFamily: 'var(--font-display)',
                 fontSize: '22px',
                 fontWeight: 600,
-                color: 'var(--color-brand-deep)',
+                color: 'var(--color-brand-deep-text)',
                 margin: 0
               }}
             >
@@ -270,7 +270,7 @@ export function TransferOrDispatchSubView({
                             fontFamily: 'monospace',
                             fontSize: '14px',
                             fontWeight: 700,
-                            color: 'var(--color-brand-deep)',
+                            color: 'var(--color-brand-deep-text)',
                             background: 'var(--color-surface)',
                             padding: '3px 8px',
                             borderRadius: '4px',
@@ -452,7 +452,7 @@ export function TransferOrDispatchSubView({
                     onChange={() => onChangeDestinationMode('INTERNAL')}
                     style={{ accentColor: 'var(--color-brand)', cursor: 'pointer' }}
                   />
-                  <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep)' }}>
+                  <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep-text)' }}>
                     Transferencia a otra área interna
                   </strong>
                 </div>
@@ -714,7 +714,7 @@ export function TransferOrDispatchSubView({
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block' }}>
                     Origen ({selectedWarehouse?.nombre})
                   </span>
-                  <div style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep)', fontSize: '13px' }}>
+                  <div style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--color-brand-deep-text)', fontSize: '13px' }}>
                     [{currentPallet.uid_tag}]
                   </div>
                   <span style={{ fontSize: '11.5px', color: 'var(--color-text-secondary)' }}>

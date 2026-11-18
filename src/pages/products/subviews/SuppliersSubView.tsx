@@ -117,7 +117,7 @@ export function SuppliersSubView({ onError }: Props) {
 
   return (
     <section className="panel master-section">
-      <h3>Subvista 1.3 – Proveedores</h3>
+      <h3>Proveedores</h3>
       <p className="muted">Gestión de proveedores de importación, métricas OTIF y tiempo de entrega (Lead Time).</p>
 
       {/* Formulario */}
@@ -193,9 +193,9 @@ export function SuppliersSubView({ onError }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th>Razón Social</th>
-                  <th>Calificación OTIF</th>
-                  <th>Lead Time (Días)</th>
+                  <th>Razón social</th>
+                  <th>Calificación OTIF (%)</th>
+                  <th>Tiempo de entrega (días)</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>

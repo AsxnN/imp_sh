@@ -1,5 +1,18 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
 import { logCatalogChange } from '../../../lib/audit'
+import { EmpaqueJerarquia } from '../components/EmpaqueJerarquia'
+import {
+  MODO_INFO,
+  TIPOS_EMPAQUE,
+  calcularPaleta,
+  capitalizar,
+  describirEmpaque,
+  etiquetaModo,
+  formatoNumero,
+  leerRegla,
+  nombreEmpaque,
+  normalizarModo
+} from '../empaque'
 import { productoRepository } from '../repositories/ProductRepository'
 import { getEstrategiaManejo } from '../strategies/RegistroEstrategias'
 import {
@@ -50,14 +63,22 @@ export function ProductsSubView({
     return categories.find((c) => String(c.id_categoria) === idCategoria) || null
   }, [categories, idCategoria])
 
-  const currentModo = selectedCategory?.modo_manejo || 'PALETIZADO'
+  const currentModo = normalizarModo(selectedCategory?.modo_manejo)
   const isSerializado = currentModo === 'SERIALIZADO'
+  const usaPaleta = currentModo === 'PALETIZADO'
 
-  // 3. Campos específicos: MODO PALETIZADO
+  // Categorías seleccionables: solo activas (más la actual si se está editando)
+  const selectableCategories = useMemo(
+    () => categories.filter((c) => c.activo !== false || String(c.id_categoria) === idCategoria),
+    [categories, idCategoria]
+  )
+
+  // 3. Campos de empaque: PALETIZADO y POR CAJA
+  // (en BD: cajas_por_camada = empaques por fila, numero_camadas = filas por paleta)
+  const [tipoEmpaque, setTipoEmpaque] = useState('CAJA')
   const [unidadesPorCaja, setUnidadesPorCaja] = useState('1')
   const [cajasPorCamada, setCajasPorCamada] = useState('1')
   const [numeroCamadas, setNumeroCamadas] = useState('1')
-  const [permitePuchos, setPermitePuchos] = useState(true)
   const [largoCm, setLargoCm] = useState('')
   const [anchoCm, setAnchoCm] = useState('')
   const [altoCm, setAltoCm] = useState('')
@@ -79,33 +100,25 @@ export function ProductsSubView({
   const [filterCategory, setFilterCategory] = useState('')
   const [search, setSearch] = useState('')
 
-  // Cálculos en tiempo real para paletizado
+  const empaqueSingular = nombreEmpaque(tipoEmpaque, 1)
+  const empaquePlural = nombreEmpaque(tipoEmpaque, 2)
+
+  // Cálculos en tiempo real del empaque
   const metrics = useMemo(() => {
-    const cCamada = Math.max(1, Number(cajasPorCamada) || 1)
-    const nCamadas = Math.max(1, Number(numeroCamadas) || 1)
-    const uCaja = Math.max(1, Number(unidadesPorCaja) || 1)
+    const calc = calcularPaleta(unidadesPorCaja, cajasPorCamada, numeroCamadas)
     const l = Number(largoCm) || 0
     const w = Number(anchoCm) || 0
     const h = Number(altoCm) || 0
-    const pCaja = Number(pesoCajaKg) || 0
-
-    const cajasPaleta = cCamada * nCamadas
-    const unidadesPaleta = cajasPaleta * uCaja
+    const pEmpaque = Number(pesoCajaKg) || 0
 
     const volCajaM3 = l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : null
-    const volPaletaM3 = volCajaM3 ? volCajaM3 * cajasPaleta : null
+    const volPaletaM3 = volCajaM3 ? volCajaM3 * calc.empaquesPorPaleta : null
 
-    const altoSugeridoCm = h > 0 ? h * nCamadas + 15 : null
-    const pesoSugeridoKg = pCaja > 0 ? pCaja * cajasPaleta + 25 : null
+    // Estimaciones con tarima estándar: +15 cm de alto y +25 kg de peso
+    const altoSugeridoCm = h > 0 ? h * calc.filasPorPaleta + 15 : null
+    const pesoSugeridoKg = pEmpaque > 0 ? pEmpaque * calc.empaquesPorPaleta + 25 : null
 
-    return {
-      cajasPaleta,
-      unidadesPaleta,
-      volCajaM3,
-      volPaletaM3,
-      altoSugeridoCm,
-      pesoSugeridoKg
-    }
+    return { ...calc, volCajaM3, volPaletaM3, altoSugeridoCm, pesoSugeridoKg }
   }, [cajasPorCamada, numeroCamadas, unidadesPorCaja, largoCm, anchoCm, altoCm, pesoCajaKg])
 
   // Volumen calculado para serializado
@@ -147,11 +160,11 @@ export function ProductsSubView({
     setClasificacionAbc('B')
     setActivo(true)
 
-    // Reset Paletizado
+    // Reset empaque
+    setTipoEmpaque('CAJA')
     setUnidadesPorCaja('1')
     setCajasPorCamada('1')
     setNumeroCamadas('1')
-    setPermitePuchos(true)
     setLargoCm('')
     setAnchoCm('')
     setAltoCm('')
@@ -223,10 +236,10 @@ export function ProductsSubView({
     // Cargar perfil según corresponda
     const rule: Rule | null = getProductRule(p)
     if (rule) {
+      setTipoEmpaque(rule.tipo_empaque || 'CAJA')
       setUnidadesPorCaja(String(rule.unidades_por_caja ?? 1))
       setCajasPorCamada(String(rule.cajas_por_camada ?? rule.cajas_por_camita ?? 1))
       setNumeroCamadas(String(rule.numero_camadas ?? rule.camitas_por_paleta ?? 1))
-      setPermitePuchos(rule.permite_puchos ?? true)
       setLargoCm(rule.largo_caja_cm ? String(rule.largo_caja_cm) : '')
       setAnchoCm(rule.ancho_caja_cm ? String(rule.ancho_caja_cm) : '')
       setAltoCm(rule.alto_caja_cm ? String(rule.alto_caja_cm) : '')
@@ -234,10 +247,10 @@ export function ProductsSubView({
       setNotasArmado(rule.notas_armado ?? '')
       setCurrentImagePath(rule.imagen_armado_path ?? null)
     } else {
+      setTipoEmpaque('CAJA')
       setUnidadesPorCaja('1')
       setCajasPorCamada('1')
       setNumeroCamadas('1')
-      setPermitePuchos(true)
       setLargoCm('')
       setAnchoCm('')
       setAltoCm('')
@@ -277,6 +290,10 @@ export function ProductsSubView({
 
     if (!skuClean || !nombreClean) {
       onError('El SKU y el nombre del producto son obligatorios.')
+      return
+    }
+    if (!idCategoria) {
+      onError('Selecciona una categoría: define cómo se maneja el producto (paletizado, por caja o serializado).')
       return
     }
 
@@ -323,10 +340,11 @@ export function ProductsSubView({
         await strategy.guardarPerfil(targetId, serialData)
       } else {
         const packingData: PackingFormData = {
+          tipo_empaque: tipoEmpaque,
           unidades_por_caja: unidadesPorCaja,
           cajas_por_camada: cajasPorCamada,
           numero_camadas: numeroCamadas,
-          permite_puchos: permitePuchos,
+          permite_puchos: usaPaleta,
           notas_armado: notasArmado,
           largo_caja_cm: largoCm,
           ancho_caja_cm: anchoCm,
@@ -357,9 +375,9 @@ export function ProductsSubView({
     <section className="panel master-section">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <h3 style={{ margin: 0 }}>Productos y Modos de Manejo</h3>
+          <h3 style={{ margin: 0 }}>Productos y empaque</h3>
           <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-            Administra los productos del catálogo adaptando sus especificaciones técnicas según su modo de manejo (paletizado o serializado).
+            La categoría define cómo se maneja cada producto: paletizado, por caja o serializado.
           </p>
         </div>
         {!showForm && (
@@ -376,16 +394,11 @@ export function ProductsSubView({
             <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text-primary)' }}>
               {editing ? `Editar producto: ${editing.sku}` : 'Registrar nuevo producto'}
             </h4>
-            <span
-              className="category-pill"
-              style={{
-                background: isSerializado ? '#fef3c7' : '#e0f2fe',
-                color: isSerializado ? '#92400e' : '#0369a1',
-                borderColor: isSerializado ? '#fde68a' : '#bae6fd'
-              }}
-            >
-              Modo: {isSerializado ? 'Serializado unitario' : 'Paletizado estándar'}
-            </span>
+            {selectedCategory && (
+              <span className="modo-pill" title={MODO_INFO[currentModo].resumen}>
+                Modo: {MODO_INFO[currentModo].label}
+              </span>
+            )}
           </div>
 
           <form className="product-form" onSubmit={handleSave}>
@@ -445,12 +458,12 @@ export function ProductsSubView({
                 </label>
 
                 <label>
-                  Categoría
-                  <select value={idCategoria} onChange={(e) => setIdCategoria(e.target.value)}>
-                    <option value="">Sin categoría</option>
-                    {categories.map((c) => (
+                  Categoría (define el modo de manejo)
+                  <select value={idCategoria} onChange={(e) => setIdCategoria(e.target.value)} required>
+                    <option value="">Selecciona una categoría</option>
+                    {selectableCategories.map((c) => (
                       <option key={c.id_categoria} value={String(c.id_categoria)}>
-                        {c.nombre} ({c.modo_manejo || 'PALETIZADO'})
+                        {c.nombre} — {etiquetaModo(c.modo_manejo)}
                       </option>
                     ))}
                   </select>
@@ -520,9 +533,9 @@ export function ProductsSubView({
             {/* Bloque 2 Dinámico: Paletizado vs Serializado */}
             {isSerializado ? (
               <fieldset style={{ marginTop: '16px' }}>
-                <legend>2. Ficha técnica de maquinaria y equipo (Serializado unitario)</legend>
+                <legend>2. Ficha técnica del equipo (serializado)</legend>
                 <p className="muted" style={{ margin: '0 0 12px', fontSize: '0.85rem' }}>
-                  Cada unidad de este producto se identificará con número de serie único y etiqueta RFID individual. No aplica regla de empaque, camadas ni puchos.
+                  Cada unidad se identifica por su número de serie de fábrica. No lleva tag RFID, empaque, paletas ni puchos.
                 </p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
@@ -617,49 +630,80 @@ export function ProductsSubView({
               </fieldset>
             ) : (
               <fieldset style={{ marginTop: '16px' }}>
-                <legend>2. Ficha de empaque y esquema de paletizado</legend>
+                <legend>{usaPaleta ? '2. Empaque y paletizado' : '2. Empaque (por caja, sin paletizar)'}</legend>
+                <p className="muted" style={{ margin: '0 0 12px', fontSize: '0.85rem' }}>
+                  {usaPaleta
+                    ? `Las paletas completas siempre van cerradas. Solo el pucho puede tener 1 ${empaqueSingular} abierto.`
+                    : `Se controla por empaques cerrados y 1 empaque abierto como máximo. No lleva paletas ni tag RFID.`}
+                </p>
 
                 <div className="number-grid">
                   <label>
-                    Unidades por caja (&gt; 0)
+                    Tipo de empaque
+                    <select value={tipoEmpaque} onChange={(e) => setTipoEmpaque(e.target.value)}>
+                      {TIPOS_EMPAQUE.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {capitalizar(t.singular)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Unidades por {empaqueSingular}
                     <input
                       type="number"
                       min="1"
+                      step="1"
                       value={unidadesPorCaja}
                       onChange={(e) => setUnidadesPorCaja(e.target.value)}
                       required
                     />
                   </label>
 
-                  <label>
-                    Cajas por camada
-                    <input
-                      type="number"
-                      min="1"
-                      value={cajasPorCamada}
-                      onChange={(e) => setCajasPorCamada(e.target.value)}
-                      required
-                    />
-                  </label>
+                  {usaPaleta && (
+                    <>
+                      <label>
+                        {capitalizar(empaquePlural)} por fila
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={cajasPorCamada}
+                          onChange={(e) => setCajasPorCamada(e.target.value)}
+                          required
+                        />
+                      </label>
 
-                  <label>
-                    Camadas por paleta
-                    <input
-                      type="number"
-                      min="1"
-                      value={numeroCamadas}
-                      onChange={(e) => setNumeroCamadas(e.target.value)}
-                      required
-                    />
-                  </label>
+                      <label>
+                        Filas por paleta
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={numeroCamadas}
+                          onChange={(e) => setNumeroCamadas(e.target.value)}
+                          required
+                        />
+                      </label>
+                    </>
+                  )}
                 </div>
 
-                <p style={{ margin: '14px 0 6px', fontWeight: 600, fontSize: '0.86rem', color: 'var(--color-brand)' }}>
-                  Dimensiones y peso de la caja
+                <EmpaqueJerarquia
+                  tipoEmpaque={tipoEmpaque}
+                  unidadesPorEmpaque={unidadesPorCaja}
+                  empaquesPorFila={cajasPorCamada}
+                  filasPorPaleta={numeroCamadas}
+                  usaPaleta={usaPaleta}
+                />
+
+                <p style={{ margin: '14px 0 6px', fontWeight: 600, fontSize: '0.86rem', color: 'var(--color-text-primary)' }}>
+                  Medidas y peso de {usaPaleta ? `cada ${empaqueSingular}` : 'cada caja'} (opcional)
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                   <label>
-                    Largo caja (cm)
+                    Largo (cm)
                     <input
                       type="number"
                       min="0"
@@ -670,7 +714,7 @@ export function ProductsSubView({
                     />
                   </label>
                   <label>
-                    Ancho caja (cm)
+                    Ancho (cm)
                     <input
                       type="number"
                       min="0"
@@ -681,7 +725,7 @@ export function ProductsSubView({
                     />
                   </label>
                   <label>
-                    Alto caja (cm)
+                    Alto (cm)
                     <input
                       type="number"
                       min="0"
@@ -692,7 +736,7 @@ export function ProductsSubView({
                     />
                   </label>
                   <label>
-                    Peso caja (kg)
+                    Peso (kg)
                     <input
                       type="number"
                       min="0"
@@ -704,72 +748,54 @@ export function ProductsSubView({
                   </label>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '12px' }}>
-                  <div className="stat-box" style={{ padding: '10px 14px', background: 'var(--color-surface)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>Alto total estimado paleta:</span>
-                    <strong style={{ fontSize: '1rem', color: 'var(--color-brand)', marginTop: '2px' }}>
-                      {metrics.altoSugeridoCm ? `${metrics.altoSugeridoCm.toFixed(1)} cm` : '—'}
-                    </strong>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      ({altoCm || 0} cm × {numeroCamadas} camadas + 15 cm tarima)
+                {usaPaleta && (
+                  <>
+                    <div className="detail-stats-grid" style={{ marginTop: '12px' }}>
+                      <div className="stat-box">
+                        <span>Alto estimado de la paleta</span>
+                        <strong>{metrics.altoSugeridoCm ? `${metrics.altoSugeridoCm.toFixed(1)} cm` : '—'}</strong>
+                        <span>{altoCm || 0} cm × {metrics.filasPorPaleta} filas + 15 cm de tarima</span>
+                      </div>
+                      <div className="stat-box">
+                        <span>Peso estimado de la paleta</span>
+                        <strong>{metrics.pesoSugeridoKg ? `${metrics.pesoSugeridoKg.toFixed(1)} kg` : '—'}</strong>
+                        <span>{pesoCajaKg || 0} kg × {metrics.empaquesPorPaleta} {empaquePlural} + 25 kg de tarima</span>
+                      </div>
+                      <div className="stat-box">
+                        <span>Volumen de la paleta</span>
+                        <strong>{metrics.volPaletaM3 ? `${metrics.volPaletaM3.toFixed(3)} m³` : '—'}</strong>
+                        <span>{metrics.volCajaM3 ? `${metrics.volCajaM3.toFixed(4)} m³ por ${empaqueSingular}` : 'Ingresa las medidas'}</span>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="stat-box" style={{ padding: '10px 14px', background: 'var(--color-surface)', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', display: 'block' }}>Peso total estimado paleta:</span>
-                    <strong style={{ fontSize: '1rem', color: 'var(--color-brand)', marginTop: '2px' }}>
-                      {metrics.pesoSugeridoKg ? `${metrics.pesoSugeridoKg.toFixed(1)} kg` : '—'}
-                    </strong>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      ({pesoCajaKg || 0} kg × {metrics.cajasPaleta} cajas + 25 kg tarima)
-                    </div>
-                  </div>
-                </div>
+                    <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
+                      Notas del patrón de armado (opcional)
+                      <input
+                        value={notasArmado}
+                        onChange={(e) => setNotasArmado(e.target.value)}
+                        placeholder="Ej. Traba 3x2, orientar etiquetas hacia el exterior"
+                      />
+                    </label>
 
-                <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
-                  Notas de patrón de armado (opcional)
-                  <input
-                    value={notasArmado}
-                    onChange={(e) => setNotasArmado(e.target.value)}
-                    placeholder="Ej. Traba 3x2, orientar etiquetas hacia el exterior"
-                  />
-                </label>
-
-                <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
-                  Diagrama visual de armado (PNG, JPG, WebP)
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                    onChange={handleFileChange}
-                  />
-                  {imageFile ? (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-success)' }}>
-                      Archivo nuevo: {imageFile.name}
-                    </span>
-                  ) : currentImagePath ? (
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                      Diagrama almacenado: {currentImagePath}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="check" style={{ marginTop: '12px' }}>
-                  <input
-                    type="checkbox"
-                    checked={permitePuchos}
-                    onChange={(e) => setPermitePuchos(e.target.checked)}
-                  />
-                  Permite cajas pucho (fraccionadas en recepción)
-                </label>
-
-                <div className="metrics" style={{ marginTop: '14px' }}>
-                  <span>{cajasPorCamada} cajas/camada</span>
-                  <span>{numeroCamadas} camadas/paleta</span>
-                  <span>{metrics.cajasPaleta} cajas/paleta</span>
-                  <strong>{metrics.unidadesPaleta} unidades/paleta</strong>
-                  {metrics.volCajaM3 && <span>Volumen caja: {metrics.volCajaM3.toFixed(4)} m³</span>}
-                  {metrics.volPaletaM3 && <span>Volumen paleta: {metrics.volPaletaM3.toFixed(3)} m³</span>}
-                </div>
+                    <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
+                      Diagrama del armado (PNG, JPG o WebP)
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                        onChange={handleFileChange}
+                      />
+                      {imageFile ? (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--color-success)' }}>
+                          Archivo nuevo: {imageFile.name}
+                        </span>
+                      ) : currentImagePath ? (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
+                          Diagrama guardado: {currentImagePath}
+                        </span>
+                      ) : null}
+                    </label>
+                  </>
+                )}
               </fieldset>
             )}
 
@@ -791,11 +817,13 @@ export function ProductsSubView({
           <label htmlFor="p-cat">Filtrar por categoría:</label>
           <select id="p-cat" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
             <option value="">Todas las categorías ({products.length})</option>
-            {categories.map((c) => (
-              <option key={c.id_categoria} value={String(c.id_categoria)}>
-                {c.nombre}
-              </option>
-            ))}
+            {categories
+              .filter((c) => c.activo !== false || products.some((p) => String(p.id_categoria) === String(c.id_categoria)))
+              .map((c) => (
+                <option key={c.id_categoria} value={String(c.id_categoria)}>
+                  {c.nombre}
+                </option>
+              ))}
           </select>
         </div>
 
@@ -833,27 +861,25 @@ export function ProductsSubView({
             <thead>
               <tr>
                 <th>SKU</th>
-                <th>Nombre / Descripción</th>
-                <th>Categoría y Modo</th>
-                <th>U. Medida / Costo</th>
+                <th>Nombre</th>
+                <th>Categoría y modo</th>
+                <th>Unidad y costo</th>
                 <th>ABC</th>
-                <th>Especificación Técnica</th>
-                <th>Dimensiones / Cubicaje</th>
+                <th>Empaque</th>
+                <th>Medidas y volumen</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((p) => {
-                const modoProd = p.categoria?.modo_manejo || 'PALETIZADO'
+                const modoProd = normalizarModo(p.categoria?.modo_manejo)
                 const esSerial = modoProd === 'SERIALIZADO'
+                const esPaletizado = modoProd === 'PALETIZADO'
                 const rule = getProductRule(p)
                 const serialProfile = getProductSerialProfile(p)
-
-                const cCamada = rule?.cajas_por_camada ?? rule?.cajas_por_camita ?? 0
-                const nCamadas = rule?.numero_camadas ?? rule?.camitas_por_paleta ?? 0
-                const cajasPaleta = cCamada * nCamadas
-                const unidadesPaleta = rule ? cajasPaleta * rule.unidades_por_caja : 0
+                const r = leerRegla(rule)
+                const nCamadas = r.filasPorPaleta
 
                 return (
                   <tr key={p.id_producto}>
@@ -861,17 +887,7 @@ export function ProductsSubView({
                     <td><strong>{p.nombre ?? p.descripcion}</strong></td>
                     <td>
                       <div><span className="category-pill">{p.categoria?.nombre ?? 'Sin categoría'}</span></div>
-                      <span
-                        style={{
-                          fontSize: '0.75rem',
-                          color: esSerial ? '#92400e' : '#0369a1',
-                          fontWeight: 600,
-                          marginTop: '2px',
-                          display: 'inline-block'
-                        }}
-                      >
-                        {esSerial ? 'Serializado unitario' : 'Paletizado'}
-                      </span>
+                      <span className="modo-pill" style={{ marginTop: '4px' }}>{etiquetaModo(modoProd)}</span>
                     </td>
                     <td>
                       <div>{p.unidad_medida ?? 'UNIDAD'}</div>
@@ -890,12 +906,9 @@ export function ProductsSubView({
                     <td>
                       {esSerial ? (
                         <div>
-                          <span style={{ fontWeight: 600, color: '#92400e' }}>Equipo individual</span>
+                          <span style={{ fontWeight: 600 }}>Por número de serie</span>
                           {serialProfile?.requiere_equipo_izaje && (
-                            <span
-                              className="category-pill"
-                              style={{ marginLeft: '6px', background: '#fee2e2', color: '#991b1b', fontSize: '0.7rem' }}
-                            >
+                            <span className="category-pill" style={{ marginLeft: '6px' }}>
                               Requiere izaje
                             </span>
                           )}
@@ -905,10 +918,12 @@ export function ProductsSubView({
                         </div>
                       ) : rule ? (
                         <div>
-                          <span>{rule.unidades_por_caja} u/caja · {cCamada} c/camada · {nCamadas} camadas</span>
-                          <div style={{ fontSize: '0.8rem', color: 'var(--color-brand)', fontWeight: 600 }}>
-                            {cajasPaleta} cajas / {unidadesPaleta} un. por paleta
-                          </div>
+                          <span>{describirEmpaque(rule, modoProd)}</span>
+                          {esPaletizado && (
+                            <div style={{ fontSize: '0.8rem', color: 'var(--color-brand)', fontWeight: 600 }}>
+                              1 paleta = {formatoNumero(r.empaquesPorPaleta)} {nombreEmpaque(r.tipoEmpaque)} · {formatoNumero(r.unidadesPorPaleta)} u
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="muted" style={{ fontSize: '0.8rem' }}>Sin empaque asignado</span>
@@ -926,6 +941,12 @@ export function ProductsSubView({
                             </div>
                           ) : null}
                         </div>
+                      ) : !esPaletizado ? (
+                        rule?.largo_caja_cm && rule?.ancho_caja_cm && rule?.alto_caja_cm ? (
+                          <div style={{ fontSize: '0.82rem' }}>
+                            Caja: {rule.largo_caja_cm}×{rule.ancho_caja_cm}×{rule.alto_caja_cm} cm
+                          </div>
+                        ) : '—'
                       ) : rule?.volumen_total_m3 || (rule?.alto_caja_cm && nCamadas) ? (
                         <div style={{ fontSize: '0.82rem' }}>
                           {rule.alto_caja_cm && nCamadas ? <div>Alto: {(rule.alto_caja_cm * nCamadas + 15).toFixed(0)} cm</div> : null}

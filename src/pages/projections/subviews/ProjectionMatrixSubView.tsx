@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from 'react'
+import type { RefObject } from 'react'
 import type {
   CalculableColumnKey,
   CalculatedProjectionRow,
@@ -29,6 +29,9 @@ const formatCustomColumnValue = (val: number, formato?: ColumnDisplayFormat): st
 
 interface ProjectionMatrixSubViewProps {
   selectedOrder: ProjectionOrder | null
+  /** Estado del autoguardado en Supabase */
+  saveState: { status: 'idle' | 'pending' | 'saving' | 'saved' | 'error'; at?: Date; error?: string }
+  onRetrySave: () => void
   activeTemplate: ProjectionTemplate
   isOrderLocked: boolean
   loading: boolean
@@ -87,12 +90,14 @@ interface ProjectionMatrixSubViewProps {
 
 export function ProjectionMatrixSubView({
   selectedOrder,
+  saveState,
+  onRetrySave,
   activeTemplate,
   isOrderLocked,
   loading,
   errorMsg,
   successMsg,
-  setSuccessMsg,
+  setSuccessMsg: _setSuccessMsg,
   onBackToList,
   onOpenExcelModal,
   onSyncLiveStock,
@@ -175,7 +180,7 @@ export function ProjectionMatrixSubView({
                 style={{
                   fontSize: '16px',
                   fontWeight: 700,
-                  color: 'var(--color-brand-deep)',
+                  color: 'var(--color-brand-deep-text)',
                   fontFamily: 'monospace'
                 }}
               >
@@ -232,14 +237,33 @@ export function ProjectionMatrixSubView({
                 {syncingStock ? 'Sincronizando...' : 'Sincronizar stock'}
               </button>
 
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => void onSaveOrderSnapshot()}
-                title="Guardar avance del cálculo para continuar en otro momento"
+              {/* Estado del autoguardado en Supabase */}
+              <span
+                className={`save-status save-${saveState.status}`}
+                role="status"
+                aria-live="polite"
+                title="Los cambios de la tabla se guardan solos en la orden (Supabase)"
               >
-                Guardar cambios
-              </button>
+                {saveState.status === 'saving'
+                  ? 'Guardando…'
+                  : saveState.status === 'pending'
+                    ? 'Cambios sin guardar…'
+                    : saveState.status === 'error'
+                      ? 'Error al guardar'
+                      : saveState.status === 'saved'
+                        ? `Guardado ${saveState.at?.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) ?? ''}`
+                        : 'Todo guardado'}
+              </span>
+              {saveState.status === 'error' && (
+                <button type="button" className="button secondary button-sm" onClick={onRetrySave} title={saveState.error}>
+                  Reintentar
+                </button>
+              )}
+              {saveState.status === 'pending' && (
+                <button type="button" className="button secondary button-sm" onClick={() => void onSaveOrderSnapshot()}>
+                  Guardar ahora
+                </button>
+              )}
             </>
           )}
 
@@ -312,7 +336,7 @@ export function ProjectionMatrixSubView({
               type="button"
               className="button secondary"
               onClick={onOpenReceptions}
-              title="Ver estado de recepción en muelle (Módulo 04)"
+              title="Ver estado de recepción en Operaciones (Módulo 04)"
             >
               Ver en recepciones
             </button>
@@ -338,7 +362,7 @@ export function ProjectionMatrixSubView({
         >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep)' }}>
+              <strong style={{ fontSize: '15px', color: 'var(--color-brand-deep-text)' }}>
                 Proyección aprobada — Modo solo lectura
               </strong>
               <span
@@ -379,7 +403,7 @@ export function ProjectionMatrixSubView({
                 type="button"
                 className="button secondary button-sm"
                 onClick={onOpenReceptions}
-                title="Ver estado de recepción en muelle (Módulo 04)"
+                title="Ver estado de recepción en Operaciones (Módulo 04)"
               >
                 Ver en recepciones
               </button>
@@ -444,7 +468,7 @@ export function ProjectionMatrixSubView({
             gap: '12px'
           }}
         >
-          <strong style={{ fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+          <strong style={{ fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
             Esta orden no tiene consumos mensuales cargados
           </strong>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-secondary)', maxWidth: '580px' }}>
@@ -458,7 +482,7 @@ export function ProjectionMatrixSubView({
                 onClick={onOpenAddMonthModal}
                 style={{ fontWeight: 600 }}
               >
-                + Agregar mes
+                + Agregar meses
               </button>
             )}
             <button
@@ -855,7 +879,7 @@ export function ProjectionMatrixSubView({
                   minWidth: '105px',
                   textAlign: 'right',
                   fontWeight: 600,
-                  background: '#F8FAFC'
+                  background: 'var(--color-canvas)'
                 }}
               >
                 <div>Promedio</div>
@@ -1055,7 +1079,7 @@ export function ProjectionMatrixSubView({
                   textAlign: 'right',
                   fontWeight: 700,
                   background: 'var(--color-brand-soft)',
-                  color: 'var(--color-brand-deep)',
+                  color: 'var(--color-brand-deep-text)',
                   cursor: 'pointer'
                 }}
                 title="Haz clic para modificar la fórmula de Compra Sugerida"
@@ -1071,12 +1095,12 @@ export function ProjectionMatrixSubView({
                     borderRadius: '3px',
                     padding: '1px 5px',
                     fontSize: '10px',
-                    color: 'var(--color-brand-deep)',
+                    color: 'var(--color-brand-deep-text)',
                     marginTop: '2px',
-                    background: '#FFFFFF'
+                    background: 'var(--color-surface)'
                   }}
                 >
-                  {activeTemplate?.formula_compra_sugerida
+                  {activeTemplate?.formula_compra
                     ? 'fórmula'
                     : `× ${activeTemplate?.factor_compra || 2}`}
                 </div>
@@ -1124,11 +1148,14 @@ export function ProjectionMatrixSubView({
             ) : (
               filteredRows.map((r, rowIdx) => {
                 const isSelected = selectedItemIds.has(r.id_item)
-                const isCritico = r.dias_duracion <= 45
+
+                const sinDato = r.texto_duracion === 'Sin stock' || r.texto_duracion === 'Sin consumo'
                 const badgeColor =
-                  r.dias_duracion <= 15
+                  r.texto_duracion === 'Sin consumo'
+                    ? 'var(--color-text-secondary)'
+                    : r.estado_critico === 'CRITICO'
                     ? 'var(--color-danger)'
-                    : r.dias_duracion <= 45
+                    : r.estado_critico === 'REORDEN'
                     ? 'var(--color-warning)'
                     : 'var(--color-success)'
 
@@ -1141,7 +1168,7 @@ export function ProjectionMatrixSubView({
                         ? 'var(--color-brand-soft)'
                         : rowIdx % 2 === 0
                         ? 'var(--color-surface)'
-                        : '#FCFDFE',
+                        : 'var(--color-bg-surface-raised)',
                       transition: 'background-color 0.12s ease'
                     }}
                   >
@@ -1167,7 +1194,7 @@ export function ProjectionMatrixSubView({
 
                     {/* Columnas dinámicas de meses (editables) */}
                     {activeTemplate?.columnas_meses?.map((m) => {
-                      const val = r.meses_consumo[m] ?? 0
+                      const val = r.datos_meses[m] ?? 0
                       const isInAverage = activeMonthsInAverage.includes(m)
                       return (
                         <td
@@ -1181,7 +1208,6 @@ export function ProjectionMatrixSubView({
                           {!isOrderLocked ? (
                             <input
                               type="number"
-                              min="0"
                               value={val}
                               onChange={(e) => onCellChange(r.id_item, `mes_${m}`, e.target.value)}
                               style={{
@@ -1198,7 +1224,7 @@ export function ProjectionMatrixSubView({
                               }}
                               onFocus={(e) => {
                                 e.currentTarget.style.borderColor = 'var(--color-brand)'
-                                e.currentTarget.style.background = '#FFFFFF'
+                                e.currentTarget.style.background = 'var(--color-surface)'
                               }}
                               onBlur={(e) => {
                                 e.currentTarget.style.borderColor = 'transparent'
@@ -1215,10 +1241,10 @@ export function ProjectionMatrixSubView({
                     })}
 
                     {/* Promedio mensual */}
-                    <td style={{ padding: '6px 8px', textAlign: 'right', background: '#F8FAFC' }}>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', background: 'var(--color-canvas)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
                         <span style={{ fontWeight: 600 }}>{r.promedio_final.toLocaleString('es-PE')}</span>
-                        {r.promedio_manual !== null && !isOrderLocked && (
+                        {(r.promedio_manual ?? null) !== null && !isOrderLocked && (
                           <button
                             type="button"
                             onClick={() => onResetManualAverage(r.id_item)}
@@ -1236,7 +1262,7 @@ export function ProjectionMatrixSubView({
                           </button>
                         )}
                       </div>
-                      {r.promedio_manual !== null && (
+                      {(r.promedio_manual ?? null) !== null && (
                         <span style={{ fontSize: '10px', color: 'var(--color-warning)', display: 'block' }}>
                           Manual
                         </span>
@@ -1265,7 +1291,7 @@ export function ProjectionMatrixSubView({
                           }}
                           onFocus={(e) => {
                             e.currentTarget.style.borderColor = 'var(--color-brand)'
-                            e.currentTarget.style.background = '#FFFFFF'
+                            e.currentTarget.style.background = 'var(--color-surface)'
                           }}
                           onBlur={(e) => {
                             e.currentTarget.style.borderColor = 'transparent'
@@ -1310,29 +1336,29 @@ export function ProjectionMatrixSubView({
                               maxWidth: '85px',
                               textAlign: 'right',
                               padding: '4px 6px',
-                              border: r.stock_min_redondeado_manual !== null
+                              border: (r.stock_min_redondeado_manual ?? null) !== null
                                 ? '1px solid var(--color-warning)'
                                 : '1px solid transparent',
                               borderRadius: '4px',
-                              background: r.stock_min_redondeado_manual !== null ? '#FEFCE8' : 'transparent',
+                              background: (r.stock_min_redondeado_manual ?? null) !== null ? 'var(--color-status-yellow-bg)' : 'transparent',
                               fontFamily: 'var(--font-body)',
                               fontSize: '13px',
                               fontWeight: 600
                             }}
                             onFocus={(e) => {
                               e.currentTarget.style.borderColor = 'var(--color-brand)'
-                              e.currentTarget.style.background = '#FFFFFF'
+                              e.currentTarget.style.background = 'var(--color-surface)'
                             }}
                             onBlur={(e) => {
                               e.currentTarget.style.borderColor =
-                                r.stock_min_redondeado_manual !== null
+                                (r.stock_min_redondeado_manual ?? null) !== null
                                   ? 'var(--color-warning)'
                                   : 'transparent'
                               e.currentTarget.style.background =
-                                r.stock_min_redondeado_manual !== null ? '#FEFCE8' : 'transparent'
+                                (r.stock_min_redondeado_manual ?? null) !== null ? 'var(--color-status-yellow-bg)' : 'transparent'
                             }}
                           />
-                          {r.stock_min_redondeado_manual !== null && (
+                          {(r.stock_min_redondeado_manual ?? null) !== null && (
                             <button
                               type="button"
                               onClick={() => onResetManualRound(r.id_item)}
@@ -1359,7 +1385,7 @@ export function ProjectionMatrixSubView({
 
                     {/* Celdas de columnas personalizadas */}
                     {activeTemplate?.columnas_personalizadas?.map((col) => {
-                      const val = r.columnas_personalizadas_valores?.[col.id] ?? 0
+                      const val = r.valores_personalizados?.[col.id] ?? 0
                       return (
                         <td
                           key={col.id}
@@ -1391,20 +1417,31 @@ export function ProjectionMatrixSubView({
                     </td>
 
                     {/* Meses de duración */}
-                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <td
+                      style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}
+                      title={
+                        r.texto_duracion === 'Sin stock'
+                          ? 'Ingresa el stock real para calcular cuánto dura.'
+                          : r.texto_duracion === 'Sin consumo'
+                          ? 'No hay salidas en los meses del promedio: el stock no se agota.'
+                          : `${r.texto_duracion} de cobertura`
+                      }
+                    >
                       <div style={{ fontWeight: 600, color: badgeColor }}>
-                        {r.meses_duracion} m
+                        {sinDato
+                          ? r.texto_duracion
+                          : `${r.meses_duracion.toLocaleString('es-PE', { maximumFractionDigits: 1 })} meses`}
                       </div>
-                      <span
-                        style={{
-                          display: 'block',
-                          fontSize: '11px',
-                          color: badgeColor,
-                          fontWeight: 500
-                        }}
-                      >
-                        Vence: {r.fecha_quiebre}
-                      </span>
+                      {!sinDato && (
+                        <span style={{ display: 'block', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          Quiebre: {r.fecha_quiebre}
+                        </span>
+                      )}
+                      {r.texto_duracion === 'Sin stock' && (
+                        <span style={{ display: 'block', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          Ingresa el stock real
+                        </span>
+                      )}
                     </td>
 
                     {/* Botón de eliminar fila */}

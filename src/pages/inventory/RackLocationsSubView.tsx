@@ -54,6 +54,11 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
   const [palletSearch, setPalletSearch] = useState('')
   const [activeTab, setActiveTab] = useState<'mapa' | 'paletas'>('mapa')
 
+  // Mapa compacto de carriles: búsqueda, filtro y carril seleccionado
+  const [laneQuery, setLaneQuery] = useState('')
+  const [laneFilter, setLaneFilter] = useState<'TODOS' | 'CON_ESPACIO' | 'LLENOS' | 'VACIOS'>('TODOS')
+  const [selectedLaneId, setSelectedLaneId] = useState<number | null>(null)
+
   // Cargar datos al cambiar de almacén
   const loadData = async () => {
     setLoading(true)
@@ -95,6 +100,62 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
   const rackCells = useMemo(() => {
     return cells.filter((c) => c.tipo_ubicacion === 'RACK')
   }, [cells])
+
+  // Resumen por carril para el mapa compacto (niveles de arriba hacia abajo, posiciones P01 → frente)
+  const laneSummaries = useMemo(() => {
+    return lanes.map((lane) => {
+      const niveles = [...lane.niveles]
+        .sort((a, b) => b.numero_nivel - a.numero_nivel)
+        .map((lvl) => ({
+          nivel: lvl,
+          celdas: rackCells
+            .filter((c) => c.id_carril === lane.id_carril && c.id_nivel === lvl.id_nivel)
+            .sort((a, b) => (a.posicion_fondo || 0) - (b.posicion_fondo || 0))
+        }))
+      const todas = niveles.flatMap((n) => n.celdas)
+      const ocupadas = todas.filter((c) => c.paleta_ocupante)
+      const textoBusqueda = [
+        lane.codigo_carril,
+        lane.nombre,
+        ...ocupadas.flatMap((c) => [c.paleta_ocupante!.producto_sku, c.paleta_ocupante!.producto_nombre, c.paleta_ocupante!.uid_tag])
+      ]
+        .join(' ')
+        .toUpperCase()
+      const conteo = new Map<string, number>()
+      for (const c of ocupadas) {
+        const k = c.paleta_ocupante!.producto_sku || c.paleta_ocupante!.producto_nombre
+        conteo.set(k, (conteo.get(k) || 0) + 1)
+      }
+      const principal = [...conteo.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+      return {
+        lane,
+        niveles,
+        total: todas.length,
+        ocupadas: ocupadas.length,
+        puchos: ocupadas.filter((c) => c.paleta_ocupante!.tipo_paleta === 'PUCHO').length,
+        principal,
+        productosDistintos: conteo.size,
+        textoBusqueda
+      }
+    })
+  }, [lanes, rackCells])
+
+  const visibleLaneSummaries = useMemo(() => {
+    return laneSummaries.filter((s) => {
+      if (laneFilter === 'CON_ESPACIO') return s.ocupadas < s.total
+      if (laneFilter === 'LLENOS') return s.total > 0 && s.ocupadas === s.total
+      if (laneFilter === 'VACIOS') return s.ocupadas === 0
+      return true
+    })
+  }, [laneSummaries, laneFilter])
+
+  const laneQueryUpper = laneQuery.trim().toUpperCase()
+  const laneMatches = (s: (typeof laneSummaries)[number]) => !laneQueryUpper || s.textoBusqueda.includes(laneQueryUpper)
+  const matchingLaneCount = laneQueryUpper ? visibleLaneSummaries.filter(laneMatches).length : visibleLaneSummaries.length
+
+  const selectedLane = useMemo(() => {
+    return lanes.find((l) => l.id_carril === selectedLaneId) ?? visibleLaneSummaries[0]?.lane ?? lanes[0] ?? null
+  }, [lanes, selectedLaneId, visibleLaneSummaries])
 
   const campoCells = useMemo(() => {
     return (
@@ -440,43 +501,16 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
         </div>
       )}
 
-      {/* Tira de Métricas de Ubicaciones */}
-      <div className="inventory-metric-strip">
-        <div className="metric-box">
-          <span className="metric-label">Carriles Drive-In</span>
-          <span className="metric-value">{lanes.length}</span>
-          <span className="metric-subtext">Entradas configuradas</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Capacidad de Celdas (Racks)</span>
-          <span className="metric-value">{metrics.totalSlots}</span>
-          <span className="metric-subtext">Posiciones en fondo</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Celdas Ocupadas</span>
-          <span className="metric-value" style={{ color: 'var(--color-brand)' }}>
-            {metrics.occupiedSlots}
-          </span>
-          <span className="metric-subtext">
-            {metrics.totalSlots > 0
-              ? `${((metrics.occupiedSlots / metrics.totalSlots) * 100).toFixed(0)}% ocupación`
-              : '0% ocupación'}
-          </span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Celdas Libres</span>
-          <span className="metric-value" style={{ color: 'var(--color-success)' }}>
-            {metrics.freeSlots}
-          </span>
-          <span className="metric-subtext">Espacios disponibles</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Zona Campo / Piso</span>
-          <span className="metric-value" style={{ color: 'var(--color-warning)' }}>
-            {metrics.totalCampo}
-          </span>
-          <span className="metric-subtext">Paletas sobredimensionadas</span>
-        </div>
+      {/* Resumen compacto de ubicaciones (los indicadores generales están arriba) */}
+      <div className="metrics" style={{ margin: '0 0 14px' }} aria-label="Resumen de ubicaciones">
+        <span>{lanes.length} {lanes.length === 1 ? 'carril' : 'carriles'} Drive-In</span>
+        <span>{metrics.totalSlots} posiciones en rack</span>
+        <span>
+          {metrics.occupiedSlots} ocupadas
+          {metrics.totalSlots > 0 ? ` (${((metrics.occupiedSlots / metrics.totalSlots) * 100).toFixed(0)} %)` : ''}
+        </span>
+        <span>{metrics.freeSlots} libres</span>
+        <span>{metrics.totalCampo} en zona campo (piso)</span>
       </div>
 
       {/* Selector de subvista: Plano vs Listado de Paletas */}
@@ -540,7 +574,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
           {/* Barra de Acciones de Ubicaciones */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
                 Plano de Racks Drive-In · {warehouseName}
               </h2>
           <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -550,7 +584,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
             type="button"
-            className="action-button primary"
+            className="action-button secondary"
             onClick={handleOpenNewLane}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
@@ -584,7 +618,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {lanes.length === 0 ? (
             <div className="empty-state-panel" style={{ padding: '40px', textAlign: 'center' }}>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                 No hay carriles Drive-In configurados en este almacén
               </h3>
               <p style={{ color: 'var(--color-text-secondary)', fontSize: '14px', maxWidth: '500px', margin: '8px auto 16px' }}>
@@ -595,16 +629,83 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
               </button>
             </div>
           ) : (
-            /* Visualizador Gráfico de Carriles Drive-In */
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))',
-                gap: '20px',
-                alignItems: 'start'
-              }}
-            >
-            {lanes.map((lane) => {
+            /* Mapa compacto de carriles + detalle del carril seleccionado */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <section className="panel" aria-label="Mapa de carriles" style={{ padding: '16px' }}>
+                <div className="no-print" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+                  <input
+                    type="search"
+                    value={laneQuery}
+                    onChange={(e) => setLaneQuery(e.target.value)}
+                    placeholder="Buscar carril, SKU, producto o tag"
+                    aria-label="Buscar carril, SKU, producto o tag"
+                    className="lane-toolbar-field"
+                    style={{ flex: '1 1 240px', maxWidth: '360px' }}
+                  />
+                  <select className="lane-toolbar-field" value={laneFilter} onChange={(e) => setLaneFilter(e.target.value as typeof laneFilter)} aria-label="Filtrar carriles">
+                    <option value="TODOS">Todos los carriles</option>
+                    <option value="CON_ESPACIO">Con espacio</option>
+                    <option value="LLENOS">Llenos</option>
+                    <option value="VACIOS">Vacíos</option>
+                  </select>
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--color-text-secondary)', marginLeft: 'auto' }}>
+                    <span className="lane-legend"><span className="lane-dot ocupada" />Ocupada</span>
+                    <span className="lane-legend"><span className="lane-dot pucho" />Pucho</span>
+                    <span className="lane-legend"><span className="lane-dot" />Libre</span>
+                  </div>
+                </div>
+                <p className="muted" style={{ margin: '0 0 12px', fontSize: '13px' }}>
+                  {laneQueryUpper
+                    ? `${matchingLaneCount} ${matchingLaneCount === 1 ? 'carril coincide' : 'carriles coinciden'} con "${laneQuery.trim()}" · `
+                    : ''}
+                  {visibleLaneSummaries.length} de {lanes.length} carriles · {metrics.occupiedSlots} de {metrics.totalSlots} posiciones ocupadas
+                  {metrics.totalSlots > 0 ? ` (${Math.round((metrics.occupiedSlots / metrics.totalSlots) * 100)} %)` : ''}. Haz clic en un carril para ver su detalle.
+                </p>
+
+                {visibleLaneSummaries.length === 0 ? (
+                  <p className="muted" style={{ textAlign: 'center', padding: '20px' }}>Ningún carril cumple el filtro seleccionado.</p>
+                ) : (
+                  <div className="lane-map">
+                    {visibleLaneSummaries.map((s) => {
+                      const pct = s.total > 0 ? Math.round((s.ocupadas / s.total) * 100) : 0
+                      const seleccionado = selectedLane?.id_carril === s.lane.id_carril
+                      const coincide = laneMatches(s)
+                      return (
+                        <button
+                          key={s.lane.id_carril}
+                          type="button"
+                          className={`lane-tile${seleccionado ? ' selected' : ''}${coincide ? '' : ' dimmed'}`}
+                          onClick={() => setSelectedLaneId(s.lane.id_carril)}
+                          aria-pressed={seleccionado}
+                          title={`${s.lane.nombre}: ${s.ocupadas} de ${s.total} ocupadas${s.principal ? ` · ${s.principal}` : ''}`}
+                        >
+                          <span className="lane-tile-head">
+                            <strong>{s.lane.codigo_carril}</strong>
+                            <span style={{ color: pct === 100 ? 'var(--color-danger)' : 'var(--color-text-secondary)' }}>{pct}%</span>
+                          </span>
+                          <span className="lane-tile-grid">
+                            {s.niveles.map((n) => (
+                              <span key={n.nivel.id_nivel} className="lane-tile-row">
+                                {n.celdas.map((c) => (
+                                  <span
+                                    key={c.id_celda}
+                                    className={`lane-dot${c.paleta_ocupante ? (c.paleta_ocupante.tipo_paleta === 'PUCHO' ? ' pucho' : ' ocupada') : ''}`}
+                                  />
+                                ))}
+                              </span>
+                            ))}
+                          </span>
+                          <span className="lane-tile-foot">
+                            {s.principal ? `${s.principal}${s.productosDistintos > 1 ? ` +${s.productosDistintos - 1}` : ''}` : 'Vacío'}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+
+            {selectedLane && [selectedLane].map((lane) => {
               // Ordenar niveles de arriba a abajo (físico: Nivel 3 arriba, Nivel 1 suelo abajo)
               const sortedLevels = [...lane.niveles].sort((a, b) => b.numero_nivel - a.numero_nivel)
 
@@ -637,20 +738,18 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                       <span
                         style={{
                           fontSize: '11px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px',
-                          color: 'var(--color-brand)',
-                          fontWeight: 700
+                          color: 'var(--color-text-secondary)',
+                          fontWeight: 600
                         }}
                       >
-                        Túnel de acumulación
+                        Detalle del carril seleccionado
                       </span>
                       <h3
                         style={{
                           margin: 0,
                           fontSize: '16px',
                           fontWeight: 600,
-                          color: 'var(--color-brand-deep)',
+                          color: 'var(--color-brand-deep-text)',
                           fontFamily: 'var(--font-display)'
                         }}
                       >
@@ -717,7 +816,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                               fontSize: '13px'
                             }}
                           >
-                            <span style={{ fontWeight: 600, color: 'var(--color-brand-deep)' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
                               Nivel {lvl.numero_nivel} {lvl.numero_nivel === 1 ? '(Piso)' : ''}
                             </span>
                             <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>
@@ -745,7 +844,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                                   style={{
                                     flex: '1 1 0',
                                     minWidth: '95px',
-                                    backgroundColor: isOccupied ? 'var(--color-surface)' : 'rgba(255, 255, 255, 0.6)',
+                                    backgroundColor: isOccupied ? 'var(--color-surface)' : 'var(--color-canvas)',
                                     border: isOccupied
                                       ? '1px solid var(--color-brand)'
                                       : '1px dashed var(--color-border)',
@@ -775,14 +874,14 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                                           style={{
                                             fontSize: '9px',
                                             backgroundColor: 'var(--color-brand-soft)',
-                                            color: 'var(--color-brand-deep)',
+                                            color: 'var(--color-brand-deep-text)',
                                             padding: '1px 3px',
                                             borderRadius: '2px',
                                             fontWeight: 600
                                           }}
                                           title="Primera en entrar / Fondo del túnel"
                                         >
-                                          FONDO
+                                          Fondo
                                         </span>
                                       )}
                                     </div>
@@ -890,7 +989,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                       margin: 0,
                       fontSize: '17px',
                       fontWeight: 600,
-                      color: 'var(--color-brand-deep)',
+                      color: 'var(--color-brand-deep-text)',
                       fontFamily: 'var(--font-display)'
                     }}
                   >
@@ -950,7 +1049,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                           </div>
                         </td>
                         <td>
-                          <code style={{ fontSize: '12px', color: 'var(--color-brand-deep)' }}>{p.uid_tag}</code>
+                          <code style={{ fontSize: '12px', color: 'var(--color-brand-deep-text)' }}>{p.uid_tag}</code>
                           {p.codigo_barras && (
                             <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
                               Barra: {p.codigo_barras}
@@ -1005,7 +1104,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep)', margin: 0 }}>
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 600, color: 'var(--color-brand-deep-text)', margin: 0 }}>
                 Control y baja de paletas activas · {warehouseName}
               </h2>
               <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--color-text-secondary)' }}>
@@ -1077,7 +1176,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                     return (
                       <tr key={p.id_etiqueta}>
                         <td>
-                          <code style={{ fontWeight: 600, color: 'var(--color-brand-deep)', fontSize: '13px' }}>
+                          <code style={{ fontWeight: 600, color: 'var(--color-brand-deep-text)', fontSize: '13px' }}>
                             {p.uid_tag}
                           </code>
                         </td>
@@ -1172,7 +1271,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
             style={{ maxWidth: '520px', width: '100%' }}
           >
             <div className="modal-header">
-              <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                 Configuración de Carril Drive-In
               </h3>
               <button
@@ -1188,7 +1287,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
             <form onSubmit={handleSaveLane} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '12px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                     Código Carril
                   </label>
                   <input
@@ -1201,14 +1300,14 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                     Nombre del Túnel
                   </label>
                   <input
                     type="text"
                     value={modalLaneName}
                     onChange={(e) => setModalLaneName(e.target.value)}
-                    placeholder="ej. Carril 01 Entrada Muelle"
+                    placeholder="ej. Carril 01 Entrada Operaciones"
                     style={{ width: '100%', padding: '8px', border: '1px solid var(--color-border)', borderRadius: '4px' }}
                   />
                 </div>
@@ -1217,7 +1316,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)' }}>
+                    <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
                       Cantidad de pisos / niveles:
                     </label>
                     <input
@@ -1346,7 +1445,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                 <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-brand)', fontWeight: 700 }}>
                   Asignación de Ubicación Física
                 </span>
-                <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep)' }}>
+                <h3 style={{ fontFamily: 'var(--font-display)', margin: 0, fontSize: '18px', color: 'var(--color-brand-deep-text)' }}>
                   Ubicación: {targetCell.codigo_ubicacion}
                 </h3>
               </div>
@@ -1385,7 +1484,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
 
               {assignMode === 'existing' ? (
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                     Selecciona la paleta a ubicar
                   </label>
                   <select
@@ -1419,7 +1518,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
               ) : (
                 <>
                   <div>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                       Producto
                     </label>
                     <select
@@ -1451,7 +1550,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                   </div>
 
                   <div style={{ marginBottom: '12px' }}>
-                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                       Código de la Paleta (Tag RFID) <span style={{ color: 'var(--color-danger)' }}>*</span>
                     </label>
                     <input
@@ -1466,7 +1565,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                         Tipo
                       </label>
                       <select
@@ -1479,7 +1578,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                       </select>
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep)', marginBottom: '4px' }}>
+                      <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-brand-deep-text)', marginBottom: '4px' }}>
                         Bultos / Cajas
                       </label>
                       <input
@@ -1527,7 +1626,7 @@ export function RackLocationsSubView({ warehouseId, warehouseName, products }: P
                     border: '1px solid var(--color-border)',
                     borderRadius: '6px',
                     padding: '10px 14px',
-                    color: 'var(--color-brand-deep)',
+                    color: 'var(--color-brand-deep-text)',
                     fontSize: '12.5px'
                   }}
                 >

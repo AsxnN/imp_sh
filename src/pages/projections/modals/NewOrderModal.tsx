@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { projectionService } from '../../../services/projectionService'
 import type { ProjectionTemplate } from '../../../types/projections'
 
 interface SupplierOption {
   id_proveedor: number
   razon_social: string
 }
+
+type Contenedor = '20FT' | '40FT' | 'LCL'
+
+const CONTENEDORES: { value: Contenedor; label: string; descripcion: string }[] = [
+  { value: '40FT', label: '40 pies', descripcion: 'Contenedor completo estándar (~67 m³).' },
+  { value: '20FT', label: '20 pies', descripcion: 'Contenedor completo pequeño (~33 m³).' },
+  { value: 'LCL', label: 'Carga consolidada', descripcion: 'LCL: se comparte el contenedor con otros importadores.' }
+]
 
 interface NewOrderModalProps {
   isOpen: boolean
@@ -14,240 +23,173 @@ interface NewOrderModalProps {
     descripcion: string
     id_plantilla: number
     id_proveedor: number | null
-    tipo_contenedor: '20FT' | '40FT' | 'LCL'
+    tipo_contenedor: Contenedor
   }) => Promise<void>
   templates: ProjectionTemplate[]
   existingOrderNumbers: string[]
   suppliers: SupplierOption[]
 }
 
-export function NewOrderModal({
-  isOpen,
-  onClose,
-  onSubmit,
-  templates,
-  existingOrderNumbers,
-  suppliers
-}: NewOrderModalProps) {
+/** Fase 1: crear la orden en Borrador. La proyección y la aprobación vienen después. */
+export function NewOrderModal({ isOpen, onClose, onSubmit, templates, existingOrderNumbers, suppliers }: NewOrderModalProps) {
   const [numeroOrden, setNumeroOrden] = useState('')
   const [descripcion, setDescripcion] = useState('')
-  const [idPlantilla, setIdPlantilla] = useState<number>(templates[0]?.id_plantilla || 1)
-  const [idProveedor, setIdProveedor] = useState<string>('')
-  const [tipoContenedor, setTipoContenedor] = useState<'40FT' | '20FT' | 'LCL'>('40FT')
+  const [idProveedor, setIdProveedor] = useState('')
+  const [tipoContenedor, setTipoContenedor] = useState<Contenedor>('40FT')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Generar número correlativo sugerido ej. IMP-2026-004
   useEffect(() => {
-    if (isOpen) {
-      const year = new Date().getFullYear()
-      let maxNum = 0
-      for (const ord of existingOrderNumbers) {
-        const match = ord.match(/(\d+)$/)
-        if (match) {
-          const n = parseInt(match[1], 10)
-          if (n > maxNum) maxNum = n
-        }
-      }
-      const nextNum = (maxNum + 1).toString().padStart(3, '0')
-      setNumeroOrden(`IMP-${year}-${nextNum}`)
-      setDescripcion(`Planificación y proyección de compras ${year}`)
-      setIdPlantilla(templates[0]?.id_plantilla || 1)
-      setTipoContenedor('40FT')
-      setIdProveedor(suppliers.length > 0 ? String(suppliers[0].id_proveedor) : '')
-      setErrorMsg(null)
-    }
-  }, [isOpen, existingOrderNumbers, templates, suppliers])
+    if (!isOpen) return
+    setErrorMsg(null)
+    setDescripcion('')
+    setTipoContenedor('40FT')
+    setIdProveedor(suppliers.length === 1 ? String(suppliers[0].id_proveedor) : '')
+    setNumeroOrden('')
+    void projectionService.getNextOrderNumber().then(setNumeroOrden).catch(() => setNumeroOrden(''))
+  }, [isOpen, templates, suppliers])
 
   if (!isOpen) return null
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const cleanNum = numeroOrden.trim().toUpperCase()
+  const duplicada = existingOrderNumbers.some((n) => n.toUpperCase() === cleanNum)
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setErrorMsg(null)
-
-    const cleanNum = numeroOrden.trim().toUpperCase()
-    if (!cleanNum) {
-      setErrorMsg('El número de orden es obligatorio.')
-      return
-    }
-
-    if (existingOrderNumbers.map((n) => n.toUpperCase()).includes(cleanNum)) {
-      setErrorMsg(`La orden "${cleanNum}" ya existe en el sistema. Elige otro número.`)
-      return
-    }
+    if (!cleanNum) return setErrorMsg('El número de orden es obligatorio.')
+    if (duplicada) return setErrorMsg(`La orden ${cleanNum} ya existe. Usa otro número.`)
+    // La plantilla (fórmulas de cálculo) se asigna automáticamente: la primera activa
+    const idPlantilla = templates[0]?.id_plantilla
+    if (!idPlantilla) return setErrorMsg('No hay plantillas de cálculo activas.')
 
     setIsSubmitting(true)
     try {
       await onSubmit({
         numero_orden: cleanNum,
-        descripcion: descripcion.trim(),
-        id_plantilla: Number(idPlantilla),
+        descripcion: descripcion.trim() || `Orden ${cleanNum}`,
+        id_plantilla: idPlantilla,
         id_proveedor: idProveedor ? Number(idProveedor) : null,
         tipo_contenedor: tipoContenedor
       })
       onClose()
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error al crear la orden de importación.')
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'No se pudo crear la orden.')
     } finally {
       setIsSubmitting(false)
     }
   }
 
   return (
-    <div className="modal-backdrop">
+    <div className="modal-overlay" onClick={() => !isSubmitting && onClose()}>
       <div
-        className="modal-card"
-        style={{
-          width: '560px',
-          maxWidth: '95vw',
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          borderRadius: '8px',
-          padding: '24px'
-        }}
+        className="modal-window"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-order-title"
+        style={{ maxWidth: '640px' }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+        <div className="modal-header">
           <div>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand)' }}>
-              Módulo 06 · Nueva orden periódica
-            </span>
-            <h2 className="section-title" style={{ margin: '4px 0 0 0', fontSize: '20px', color: 'var(--color-brand-deep)' }}>
-              Crear orden de importación y proyección
-            </h2>
-            <p className="muted" style={{ margin: '4px 0 0 0', fontSize: '13px' }}>
-              Configura los datos base de la orden. Luego ingresarás a la matriz para calcular consumos, subir el Excel de salidas y confirmar la compra.
+            <h3 id="new-order-title">Nueva orden de importación</h3>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '14px' }}>
+              Se crea en <strong>Borrador</strong>. Después calcularás la compra en la matriz de proyección.
             </p>
           </div>
-          <button type="button" className="modal-close-btn" onClick={onClose} disabled={isSubmitting}>
+          <button type="button" className="modal-close-btn" onClick={onClose} disabled={isSubmitting} aria-label="Cerrar">
             ✕
           </button>
         </div>
 
-        {errorMsg && (
-          <div
-            style={{
-              padding: '10px 14px',
-              borderRadius: '6px',
-              background: '#FDF2F0',
-              border: '1px solid var(--color-danger)',
-              color: 'var(--color-danger)',
-              fontSize: '13px',
-              marginBottom: '16px'
-            }}
-          >
-            {errorMsg}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <div>
-            <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              Número de orden de importación *
-            </label>
-            <input
-              type="text"
-              className="field-input"
-              value={numeroOrden}
-              onChange={(e) => setNumeroOrden(e.target.value.toUpperCase())}
-              placeholder="ej. IMP-2026-004"
-              required
-              disabled={isSubmitting}
-              style={{ fontFamily: 'monospace', fontWeight: 600 }}
-            />
-          </div>
-
-          <div>
-            <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              Descripción o período operativo
-            </label>
-            <input
-              type="text"
-              className="field-input"
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              placeholder="ej. Campaña Suministros Agencias Noviembre 2026"
-              disabled={isSubmitting}
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                Plantilla / Unidad de negocio
+        {templates.length === 0 ? (
+          <p className="error notice" role="alert">
+            No hay plantillas de proyección activas. Se necesita al menos una para crear órdenes.
+          </p>
+        ) : (
+          <form className="product-form" onSubmit={handleSubmit} noValidate>
+            <fieldset>
+              <legend>1. Identificación</legend>
+              <div className="number-grid">
+                <label>
+                  Número de orden
+                  <input
+                    value={numeroOrden}
+                    onChange={(e) => setNumeroOrden(e.target.value.toUpperCase())}
+                    placeholder="IMP-2026-001"
+                    aria-invalid={duplicada}
+                    style={{ fontWeight: 600, letterSpacing: '0.5px' }}
+                  />
+                  {duplicada ? (
+                    <span className="field-error">Ya existe una orden con ese número.</span>
+                  ) : (
+                    <span className="field-help">Correlativo sugerido del año. Puedes cambiarlo.</span>
+                  )}
+                </label>
+                <label>
+                  Proveedor
+                  <select value={idProveedor} onChange={(e) => setIdProveedor(e.target.value)}>
+                    <option value="">Por definir</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id_proveedor} value={s.id_proveedor}>
+                        {s.razon_social}
+                      </option>
+                    ))}
+                  </select>
+                  {suppliers.length === 0 && (
+                    <span className="field-help">No hay proveedores. Regístralos en Maestros y empaque → Proveedores.</span>
+                  )}
+                </label>
+              </div>
+              <label style={{ marginTop: '12px' }}>
+                Descripción o campaña (opcional)
+                <input
+                  value={descripcion}
+                  onChange={(e) => setDescripcion(e.target.value)}
+                  placeholder="Ej. Reposición agencias diciembre 2026"
+                />
               </label>
-              <select
-                className="field-input"
-                value={idPlantilla}
-                onChange={(e) => setIdPlantilla(Number(e.target.value))}
-                disabled={isSubmitting}
-              >
-                {templates.map((t) => (
-                  <option key={t.id_plantilla} value={t.id_plantilla}>
-                    {t.nombre}
-                  </option>
+            </fieldset>
+
+            <fieldset style={{ marginTop: '16px' }}>
+              <legend>2. Tipo de contenedor</legend>
+              <div className="choice-cards" role="radiogroup" aria-label="Tipo de contenedor">
+                {CONTENEDORES.map((c) => (
+                  <label key={c.value} className={`choice-card ${tipoContenedor === c.value ? 'selected' : ''}`}>
+                    <input type="radio" name="contenedor" checked={tipoContenedor === c.value} onChange={() => setTipoContenedor(c.value)} />
+                    <span className="choice-card-title">{c.label}</span>
+                    <span className="choice-card-text">{c.descripcion}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
+            </fieldset>
+
+            <div className="empaque-jerarquia" style={{ marginTop: '16px' }}>
+              <div className="empaque-total">
+                <span>Resumen</span>
+                <strong>
+                  {cleanNum || 'Sin número'} · {CONTENEDORES.find((c) => c.value === tipoContenedor)?.label} ·{' '}
+                  {suppliers.find((s) => String(s.id_proveedor) === idProveedor)?.razon_social ?? 'Proveedor por definir'}
+                </strong>
+              </div>
             </div>
 
-            <div>
-              <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                Tipo de contenedor marítimo
-              </label>
-              <select
-                className="field-input"
-                value={tipoContenedor}
-                onChange={(e) => setTipoContenedor(e.target.value as any)}
-                disabled={isSubmitting}
-              >
-                <option value="40FT">40 pies (40FT · Capacidad estándar)</option>
-                <option value="20FT">20 pies (20FT · Carga media)</option>
-                <option value="LCL">Carga consolidada (LCL)</option>
-              </select>
+            {errorMsg && (
+              <p className="error notice" role="alert" style={{ marginTop: '14px' }}>
+                {errorMsg}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px' }}>
+              <button type="button" className="btn-secondary" onClick={onClose} disabled={isSubmitting}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary" disabled={isSubmitting || duplicada || !cleanNum}>
+                {isSubmitting ? 'Creando…' : 'Crear orden y abrir proyección'}
+              </button>
             </div>
-          </div>
-
-          <div>
-            <label className="field-label" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              Proveedor sugerido
-            </label>
-            <select
-              className="field-input"
-              value={idProveedor}
-              onChange={(e) => setIdProveedor(e.target.value)}
-              disabled={isSubmitting}
-            >
-              <option value="">Proveedor genérico / Por definir</option>
-              {suppliers.map((s) => (
-                <option key={s.id_proveedor} value={s.id_proveedor}>
-                  {s.razon_social}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div
-            style={{
-              padding: '12px',
-              borderRadius: '6px',
-              background: 'var(--color-canvas)',
-              border: '1px solid var(--color-border)',
-              fontSize: '13px',
-              color: 'var(--color-text-secondary)',
-              marginTop: '4px'
-            }}
-          >
-            <strong>Estado inicial:</strong> La orden se creará en estado <strong>Borrador</strong> para que puedas ajustar consumos, cargar el Excel de salidas y calcular la compra sugerida sin afectar el muelle de recepción.
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-            <button type="button" className="button secondary" onClick={onClose} disabled={isSubmitting}>
-              Cancelar
-            </button>
-            <button type="submit" className="button primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Creando orden...' : 'Crear orden y abrir matriz'}
-            </button>
-          </div>
-        </form>
+          </form>
+        )}
       </div>
     </div>
   )

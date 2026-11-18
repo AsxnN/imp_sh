@@ -17,7 +17,7 @@ import { ProjectionMatrixSubView } from './subviews/ProjectionMatrixSubView'
 import { NewOrderModal } from './modals/NewOrderModal'
 import { ExcelImportModal } from './modals/ExcelImportModal'
 import { GlobalParametersModal } from './modals/GlobalParametersModal'
-import { AddMonthModal } from './modals/AddMonthModal'
+import { AddMonthModal, ordenarMeses } from './modals/AddMonthModal'
 import { AddProductModal } from './modals/AddProductModal'
 import { EquationBuilderModal } from './modals/EquationBuilderModal'
 import { AddCustomColumnModal } from './modals/AddCustomColumnModal'
@@ -25,7 +25,6 @@ import type {
   CalculableColumnKey,
   CalculatedProjectionRow,
   ColumnDisplayFormat,
-  ColumnEquationConfig,
   CustomProjectionColumn,
   ProjectionItem,
   ProjectionOrder,
@@ -76,7 +75,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   const [startMonth, setStartMonth] = useState<string>('SEP')
   const [endMonth, setEndMonth] = useState<string>('JUL')
   const [ignoreZeroMonths, setIgnoreZeroMonths] = useState<boolean>(true)
-  const [isUpdatingMonthRange, setIsUpdatingMonthRange] = useState(false)
+  const [isUpdatingMonthRange] = useState(false)
 
   // 5. Barra de Fórmulas tipo Excel y Constructor Visual
   const [formulaBarColumn, setFormulaBarColumn] = useState<CalculableColumnKey>('compra_sugerida')
@@ -119,7 +118,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
 
   // Modal de Agregar Mes
   const [addMonthModalOpen, setAddMonthModalOpen] = useState(false)
-  const [newMonthName, setNewMonthName] = useState('')
   const [isAddingMonth, setIsAddingMonth] = useState(false)
 
   // Modal de Agregar Producto
@@ -133,10 +131,31 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   const [packingPreviousView, setPackingPreviousView] = useState<'list' | 'matrix' | 'approval_summary'>('matrix')
   const [isGeneratingPackingPlan, setIsGeneratingPackingPlan] = useState(false)
 
+  // Autoguardado de la proyección de la orden en Supabase
+  const [saveState, setSaveState] = useState<{
+    status: 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+    at?: Date
+    error?: string
+  }>({ status: 'idle' })
+  const lastSavedRef = useRef<string>('')
+  /** Orden cuyos datos ya están cargados en la tabla: el autoguardado solo escribe en ella */
+  const hydratedOrderIdRef = useRef<number | null>(null)
+  const [saveRetry, setSaveRetry] = useState(0)
+
   // Plantilla activa
+  // El rango del promedio (inicio, fin, ignorar ceros) es de la ORDEN, no de la plantilla:
+  // se inyecta aquí para que el motor de fórmulas use siempre los meses elegidos en esta orden.
   const activeTemplate = useMemo(() => {
-    return templates.find((t) => t.id_plantilla === selectedTemplateId) || templates[0]
-  }, [templates, selectedTemplateId])
+    const tpl = templates.find((t) => t.id_plantilla === selectedTemplateId) || templates[0]
+    if (!tpl) return tpl
+    const meses = tpl.columnas_meses || []
+    return {
+      ...tpl,
+      mes_inicio_promedio: startMonth && meses.includes(startMonth) ? startMonth : meses[0] ?? null,
+      mes_fin_promedio: endMonth && meses.includes(endMonth) ? endMonth : meses[meses.length - 1] ?? null,
+      ignorar_meses_cero: ignoreZeroMonths
+    }
+  }, [templates, selectedTemplateId, startMonth, endMonth, ignoreZeroMonths])
 
   // Meses activos participantes en el promedio
   const activeMonthsInAverage = useMemo(() => {
@@ -208,8 +227,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         setEndMonth(initEnd)
         setIgnoreZeroMonths(activeTpl.ignorar_meses_cero !== false)
 
-        const rawItems = await projectionService.getItems(activeTpl.id_plantilla, activeTpl.codigo)
-        setItems(rawItems)
+        // Los productos de la tabla son de cada ORDEN (se cargan al abrirla), nunca de la plantilla
       }
     } catch (err: any) {
       setErrorMsg(`Error al cargar datos de proyecciones: ${err.message}`)
@@ -224,18 +242,27 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
 
   // GESTIÓN Y SELECCIÓN DE ÓRDENES GUARDADAS
   const handleSelectOrder = async (order: ProjectionOrder) => {
-    const snapshot =
-      order.snapshot_proyeccion ||
-      projectionService.getSnapshotFromStorage(order.id_orden, order.numero_orden)
+    hydratedOrderIdRef.current = null
+    setItems([])
+    // La proyección de la orden vive solo en Supabase (orden_importacion.snapshot_proyeccion)
+    const snapshot = order.snapshot_proyeccion || null
+    lastSavedRef.current = JSON.stringify({
+      columnas_meses: snapshot?.columnas_meses || [],
+      startMonth: snapshot?.startMonth || "",
+      endMonth: snapshot?.endMonth || "",
+      ignoreZeroMonths: snapshot?.ignoreZeroMonths !== false,
+      items: snapshot?.items || []
+    })
+    setSaveState({ status: "idle" })
 
+    // El estado oficial es el de la BD (FALTA_APROBACION ya existe en orden_estado)
     const resolvedOrder: ProjectionOrder = {
       ...order,
-      snapshot_proyeccion: snapshot,
-      estado: snapshot?.estado_operativo || order.estado
+      snapshot_proyeccion: snapshot
     }
 
     setSelectedOrder(resolvedOrder)
-    const tplId = order.id_plantilla || 1
+    const tplId = order.id_plantilla || snapshot?.templateId || templates[0]?.id_plantilla
     setSelectedTemplateId(tplId)
     setSelectedItemIds(new Set())
     setErrorMsg(null)
@@ -271,12 +298,9 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         setIgnoreZeroMonths(activeTpl.ignorar_meses_cero !== false)
       }
 
-      if (snapshot?.items !== undefined && Array.isArray(snapshot.items)) {
-        setItems(snapshot.items)
-      } else {
-        const rawItems = await projectionService.getItems(activeTpl.id_plantilla, activeTpl.codigo)
-        setItems(rawItems)
-      }
+      // Cada orden tiene sus propios productos (no se cargan los de la plantilla compartida)
+      setItems(Array.isArray(snapshot?.items) ? snapshot.items : [])
+      hydratedOrderIdRef.current = order.id_orden
     }
 
     setViewMode('matrix')
@@ -290,6 +314,9 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     tipo_contenedor: '20FT' | '40FT' | 'LCL'
   }) => {
     const activeTpl = templates.find((t) => t.id_plantilla === data.id_plantilla) || templates[0]
+    if (!activeTpl) {
+      throw new Error('No hay plantillas de proyección activas. Crea una antes de registrar órdenes.')
+    }
     const cleanItems: ProjectionItem[] = []
 
     const res = await projectionService.createOrder({
@@ -323,7 +350,11 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   }
 
   const handleDeleteOrder = async (id_orden: number) => {
-    await projectionService.deleteOrder(id_orden)
+    const res = await projectionService.deleteOrder(id_orden)
+    if (!res.success) {
+      setErrorMsg(res.error || 'No se pudo eliminar la orden.')
+      return
+    }
     const updatedOrders = await projectionService.getOrders()
     setOrders(updatedOrders)
     if (selectedOrder?.id_orden === id_orden) {
@@ -335,7 +366,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
 
   // Volver a la lista de órdenes persistiendo el avance actual
   const handleBackToList = () => {
-    if (selectedOrder) {
+    if (selectedOrder && hydratedOrderIdRef.current === selectedOrder.id_orden) {
       const currentMonths = activeTemplate?.columnas_meses || []
       const sumUnits = calculatedRows.reduce((acc, r) => acc + (r.compra_sugerida || 0), 0)
       const snapshot: any = {
@@ -349,11 +380,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         customColumns: activeTemplate?.columnas_personalizadas,
         estado_operativo: selectedOrder.estado
       }
-      projectionService.saveSnapshotToStorage(
-        selectedOrder.id_orden,
-        selectedOrder.numero_orden,
-        snapshot
-      )
       void projectionService.updateOrder(selectedOrder.id_orden, {
         numero_orden: selectedOrder.numero_orden,
         total_items: items.length,
@@ -383,24 +409,12 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     setIsGeneratingPackingPlan(true)
     setErrorMsg(null)
     try {
-      let orderToPlan = ord
-      if ((!ord.detalles || ord.detalles.length === 0) && calculatedRows.length > 0) {
-        const rowsWithPurchase = calculatedRows.filter((r) => r.compra_sugerida > 0)
-        orderToPlan = {
-          ...ord,
-          detalles: rowsWithPurchase.map((r) => ({
-            id_producto: r.id_producto || 0,
-            cantidad_pedida: r.compra_sugerida,
-            producto: {
-              sku: `PROD-${r.id_producto || 'A'}`,
-              nombre: r.nombre_producto
-            }
-          }))
-        }
-      }
-
+      // Las cantidades salen de lo aprobado (snapshot.approval_summary); el plan queda guardado en Supabase
       const warehousePrefix = ord.snapshot_proyeccion?.warehousePrefix || 'IMP'
-      const plan = await packingListService.generateOrderPackingPlan(orderToPlan, warehousePrefix)
+      const plan = await packingListService.generateOrderPackingPlan(
+        ord as any,
+        warehousePrefix
+      )
       setPackingPreviousView(viewMode === 'packing_list' ? 'matrix' : viewMode)
       setPackingPlan(plan)
       setViewMode('packing_list')
@@ -499,11 +513,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         items,
         estado_operativo: selectedOrder.estado
       }
-      projectionService.saveSnapshotToStorage(
-        selectedOrder.id_orden,
-        selectedOrder.numero_orden,
-        updatedSnapshot
-      )
       void projectionService.updateOrder(selectedOrder.id_orden, {
         numero_orden: selectedOrder.numero_orden,
         snapshot_proyeccion: updatedSnapshot
@@ -634,7 +643,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   }
 
   const handleSaveOrderSnapshot = async () => {
-    if (!selectedOrder) return
+    if (!selectedOrder || hydratedOrderIdRef.current !== selectedOrder.id_orden) return
     try {
       const sumUnits = calculatedRows.reduce((acc, r) => acc + (r.compra_sugerida || 0), 0)
       const currentMonths = activeTemplate?.columnas_meses || []
@@ -650,11 +659,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         estado_operativo: selectedOrder.estado
       }
 
-      projectionService.saveSnapshotToStorage(
-        selectedOrder.id_orden,
-        selectedOrder.numero_orden,
-        snapshot
-      )
 
       await projectionService.updateOrder(selectedOrder.id_orden, {
         numero_orden: selectedOrder.numero_orden,
@@ -698,9 +702,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
       setEndMonth(detectedMonths[detectedMonths.length - 1])
     }
 
-    for (const item of updatedItems) {
-      void projectionService.updateItemCell(item.id_item, { datos_meses: item.datos_meses })
-    }
 
     if (selectedOrder) {
       const sumUnits = calculatedRows.reduce((acc, r) => acc + (r.compra_sugerida || 0), 0)
@@ -715,11 +716,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         customColumns: activeTemplate?.columnas_personalizadas,
         estado_operativo: selectedOrder.estado
       }
-      projectionService.saveSnapshotToStorage(
-        selectedOrder.id_orden,
-        selectedOrder.numero_orden,
-        snap
-      )
       void projectionService.updateOrder(selectedOrder.id_orden, {
         numero_orden: selectedOrder.numero_orden,
         total_items: updatedItems.length,
@@ -762,6 +758,60 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     if (!activeTemplate) return []
     return projectionFormulaEngine.calculateAll(items, activeTemplate, liveStockMap)
   }, [items, activeTemplate, liveStockMap])
+
+  /**
+   * AUTOGUARDADO: 1,2 s después del último cambio guarda en la orden (Supabase)
+   * los meses, el rango del promedio y todos los valores de la tabla.
+   * No se usa el almacenamiento del navegador.
+   */
+  const autosaveMonths = activeTemplate?.columnas_meses
+  useEffect(() => {
+    if (viewMode !== 'matrix' || !selectedOrder || isOrderLocked || !activeTemplate) return
+    if (hydratedOrderIdRef.current !== selectedOrder.id_orden) return
+    const core = {
+      columnas_meses: autosaveMonths || [],
+      startMonth,
+      endMonth,
+      ignoreZeroMonths,
+      items
+    }
+    const json = JSON.stringify(core)
+    if (json === lastSavedRef.current) return
+
+    setSaveState({ status: 'pending' })
+    const timer = setTimeout(async () => {
+      setSaveState({ status: 'saving' })
+      const sumUnits = calculatedRows.reduce((acc, r) => acc + (r.compra_sugerida || 0), 0)
+      const snapshot = { templateId: activeTemplate.id_plantilla, templateCodigo: activeTemplate.codigo, ...core }
+      const res = await projectionService.updateOrder(selectedOrder.id_orden, {
+        numero_orden: selectedOrder.numero_orden,
+        total_items: items.length,
+        total_unidades: sumUnits,
+        snapshot_proyeccion: snapshot
+      })
+      if (res.success) {
+        lastSavedRef.current = json
+        setSaveState({ status: 'saved', at: new Date() })
+        setSelectedOrder((prev) => (prev ? { ...prev, snapshot_proyeccion: { ...(prev.snapshot_proyeccion || {}), ...snapshot } } : prev))
+      } else {
+        setSaveState({ status: 'error', error: res.error })
+      }
+    }, 1200)
+    return () => clearTimeout(timer)
+    // calculatedRows depende de items: no hace falta como dependencia
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, startMonth, endMonth, ignoreZeroMonths, autosaveMonths, selectedOrder?.id_orden, viewMode, isOrderLocked, saveRetry])
+
+  // Avisar si se intenta cerrar la pestaña con cambios sin guardar
+  useEffect(() => {
+    const pendiente = saveState.status === 'pending' || saveState.status === 'saving' || saveState.status === 'error'
+    if (!pendiente) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [saveState.status])
 
   // Filtrado y búsqueda
   const filteredRows = useMemo(() => {
@@ -864,7 +914,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
       })
     }
 
-    void projectionService.addItem(activeTemplate?.id_plantilla || 1, cleanName, initialStock)
 
     const updatedItems = [...items, newItem]
     setItems(updatedItems)
@@ -881,11 +930,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
         customColumns: activeTemplate?.columnas_personalizadas,
         estado_operativo: selectedOrder.estado
       }
-      projectionService.saveSnapshotToStorage(
-        selectedOrder.id_orden,
-        selectedOrder.numero_orden,
-        updatedSnapshot
-      )
       void projectionService.updateOrder(selectedOrder.id_orden, {
         numero_orden: selectedOrder.numero_orden,
         total_items: updatedItems.length,
@@ -925,41 +969,13 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   }, [calculatedRows])
 
   // GESTIÓN DEL RANGO DE MESES PARA PROMEDIO
+  /** El rango del promedio es propio de cada orden: se guarda con el autoguardado de la orden. */
   const handleApplyMonthRange = async (newStart: string, newEnd: string, newIgnore: boolean) => {
     if (!activeTemplate) return
     setStartMonth(newStart)
     setEndMonth(newEnd)
     setIgnoreZeroMonths(newIgnore)
-
-    setTemplates((prev) =>
-      prev.map((t) =>
-        t.id_plantilla === activeTemplate.id_plantilla
-          ? {
-              ...t,
-              mes_inicio_promedio: newStart,
-              mes_fin_promedio: newEnd,
-              ignorar_meses_cero: newIgnore
-            }
-          : t
-      )
-    )
-
-    setIsUpdatingMonthRange(true)
-    try {
-      await projectionService.updateMonthRange(
-        activeTemplate.id_plantilla,
-        newStart,
-        newEnd,
-        newIgnore
-      )
-      setSuccessMsg(
-        `Rango para promedio actualizado: de ${newStart} a ${newEnd}. La matriz recalculó el consumo reactivamente.`
-      )
-    } catch (err: any) {
-      console.warn('Advertencia al guardar rango de meses:', err)
-    } finally {
-      setIsUpdatingMonthRange(false)
-    }
+    setSuccessMsg(`Promedio calculado con los meses de ${newStart} a ${newEnd}.`)
   }
 
   // Accesos rápidos de rango de meses
@@ -1220,63 +1236,39 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
   }
 
   // EDICIÓN INTERACTIVA DE CELDAS INLINE Y RESET
+  /**
+   * Edición de celdas. Solo actualiza el estado; el autoguardado persiste la
+   * proyección en la orden (Supabase). Acepta los nombres de campo que envía la tabla.
+   * Los consumos pueden ser negativos (las salidas del Excel vienen con signo -).
+   */
   const handleCellChange = (id_item: number, field: string, rawValue: string) => {
     if (isOrderLocked) return
-    const numValue = rawValue === '' ? null : Number(rawValue)
+    const parsed = rawValue.trim() === '' || rawValue === '-' ? null : Number(rawValue)
+    if (parsed !== null && Number.isNaN(parsed)) return
+    const numValue = parsed
 
-    setItems((prevItems) => {
-      const updated = prevItems.map((item) => {
+    setItems((prevItems) =>
+      prevItems.map((item) => {
         if (item.id_item !== id_item) return item
 
-        if (field.startsWith('month_')) {
-          const monthKey = field.replace('month_', '')
-          const updatedMonths = {
-            ...item.datos_meses,
-            [monthKey]: numValue !== null ? numValue : 0
-          }
-          void projectionService.updateItemCell(id_item, { datos_meses: updatedMonths })
-          return { ...item, datos_meses: updatedMonths }
+        const monthMatch = field.match(/^(?:mes|month)_(.+)$/)
+        if (monthMatch) {
+          return { ...item, datos_meses: { ...item.datos_meses, [monthMatch[1]]: numValue ?? 0 } }
         }
-
-        if (field === 'promedio_manual') {
-          void projectionService.updateItemCell(id_item, { promedio_manual: numValue })
-          return { ...item, promedio_manual: numValue }
+        switch (field) {
+          case 'promedio_manual':
+            return { ...item, promedio_manual: numValue }
+          case 'stock_real':
+          case 'stock_manual':
+            return { ...item, stock_manual: numValue }
+          case 'stock_min_redondeado_manual':
+          case 'stock_redondeado_manual':
+            return { ...item, stock_redondeado_manual: numValue }
+          default:
+            return item
         }
-
-        if (field === 'stock_manual') {
-          void projectionService.updateItemCell(id_item, { stock_manual: numValue })
-          return { ...item, stock_manual: numValue }
-        }
-
-        if (field === 'stock_redondeado_manual') {
-          void projectionService.updateItemCell(id_item, { stock_redondeado_manual: numValue })
-          return { ...item, stock_redondeado_manual: numValue }
-        }
-
-        return item
       })
-
-      if (selectedOrder) {
-        const snap = {
-          templateId: activeTemplate?.id_plantilla,
-          templateCodigo: activeTemplate?.codigo,
-          startMonth,
-          endMonth,
-          columnas_meses: activeTemplate?.columnas_meses || [],
-          ignoreZeroMonths,
-          items: updated,
-          customColumns: activeTemplate?.columnas_personalizadas,
-          estado_operativo: selectedOrder.estado
-        }
-        projectionService.saveSnapshotToStorage(
-          selectedOrder.id_orden,
-          selectedOrder.numero_orden,
-          snap
-        )
-      }
-
-      return updated
-    })
+    )
   }
 
   // Revertir sobreescritura manual al promedio calculado por la fórmula
@@ -1285,7 +1277,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     setItems((prev) =>
       prev.map((i) => (i.id_item === id_item ? { ...i, promedio_manual: null } : i))
     )
-    void projectionService.updateItemCell(id_item, { promedio_manual: null })
   }
 
   // Revertir sobreescritura manual al stock redondeado comercial
@@ -1294,7 +1285,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     setItems((prev) =>
       prev.map((i) => (i.id_item === id_item ? { ...i, stock_redondeado_manual: null } : i))
     )
-    void projectionService.updateItemCell(id_item, { stock_redondeado_manual: null })
   }
 
   // SELECCIÓN GRUPAL Y ÓRDENES
@@ -1366,83 +1356,66 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     }
   }
 
-  // Agregar nueva columna de mes
-  const handleAddMonth = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!activeTemplate || !newMonthName.trim()) return
-    const upperMonth = newMonthName.trim().toUpperCase()
+  /**
+   * Agregar uno o varios meses a la proyección de ESTA orden.
+   * Se guardan en la orden (orden_importacion.snapshot_proyeccion en Supabase);
+   * ya no se modifica la plantilla compartida ni se copia al navegador.
+   */
+  const handleAddMonths = async (newMonths: string[]) => {
+    if (!activeTemplate || !selectedOrder || isOrderLocked || newMonths.length === 0) return
 
     const existingMonths = activeTemplate.columnas_meses || []
-    if (existingMonths.includes(upperMonth)) {
-      setErrorMsg(`El mes "${upperMonth}" ya está incluido en la matriz.`)
+    const toAdd = newMonths.filter((m) => !existingMonths.includes(m))
+    if (toAdd.length === 0) {
+      setErrorMsg('Los meses elegidos ya están en la tabla.')
       return
+    }
+
+    const updatedMonths = ordenarMeses([...existingMonths, ...toAdd], existingMonths[0])
+    const updatedItems = items.map((it) => ({
+      ...it,
+      datos_meses: Object.fromEntries(updatedMonths.map((m) => [m, it.datos_meses[m] ?? 0]))
+    }))
+    // Al agregar meses, el promedio pasa a usar TODOS los meses de la tabla (se puede acotar después)
+    const newStart = updatedMonths[0]
+    const newEnd = updatedMonths[updatedMonths.length - 1]
+
+    const updatedSnapshot = {
+      ...(selectedOrder.snapshot_proyeccion || {}),
+      templateId: activeTemplate.id_plantilla,
+      templateCodigo: activeTemplate.codigo,
+      columnas_meses: updatedMonths,
+      startMonth: newStart,
+      endMonth: newEnd,
+      ignoreZeroMonths,
+      items: updatedItems
     }
 
     setIsAddingMonth(true)
     setErrorMsg(null)
+    const res = await projectionService.updateOrder(selectedOrder.id_orden, {
+      numero_orden: selectedOrder.numero_orden,
+      total_items: updatedItems.length,
+      snapshot_proyeccion: updatedSnapshot
+    })
+    setIsAddingMonth(false)
 
-    try {
-      await projectionService.addMonthColumn(
-        activeTemplate.id_plantilla,
-        existingMonths,
-        upperMonth
-      )
-
-      const updatedMonths = [...existingMonths, upperMonth]
-      setTemplates((prev) =>
-        prev.map((t) =>
-          t.id_plantilla === activeTemplate.id_plantilla
-            ? { ...t, columnas_meses: updatedMonths }
-            : t
-        )
-      )
-
-      if (!startMonth) {
-        setStartMonth(upperMonth)
-      }
-      setEndMonth(upperMonth)
-
-      const updatedItems = items.map((it) => ({
-        ...it,
-        datos_meses: {
-          ...it.datos_meses,
-          [upperMonth]: it.datos_meses[upperMonth] ?? 0
-        }
-      }))
-      setItems(updatedItems)
-
-      if (selectedOrder) {
-        const updatedSnapshot = {
-          ...(selectedOrder.snapshot_proyeccion || {}),
-          templateId: activeTemplate.id_plantilla,
-          templateCodigo: activeTemplate.codigo,
-          columnas_meses: updatedMonths,
-          startMonth: selectedOrder.snapshot_proyeccion?.startMonth || startMonth || upperMonth,
-          endMonth: upperMonth,
-          items: updatedItems,
-          customColumns: activeTemplate.columnas_personalizadas,
-          estado_operativo: selectedOrder.estado
-        }
-        projectionService.saveSnapshotToStorage(
-          selectedOrder.id_orden,
-          selectedOrder.numero_orden,
-          updatedSnapshot
-        )
-        void projectionService.updateOrder(selectedOrder.id_orden, {
-          numero_orden: selectedOrder.numero_orden,
-          snapshot_proyeccion: updatedSnapshot
-        })
-        setSelectedOrder((prev) => (prev ? { ...prev, snapshot_proyeccion: updatedSnapshot } : prev))
-      }
-
-      setSuccessMsg(`Columna ${upperMonth} incorporada a la matriz exitosamente.`)
-      setNewMonthName('')
-      setAddMonthModalOpen(false)
-    } catch (err: any) {
-      setErrorMsg(`Error al agregar mes: ${err.message}`)
-    } finally {
-      setIsAddingMonth(false)
+    if (!res.success) {
+      setErrorMsg(res.error || 'No se pudieron guardar los meses en la orden.')
+      return
     }
+
+    setTemplates((prev) =>
+      prev.map((t) => (t.id_plantilla === activeTemplate.id_plantilla ? { ...t, columnas_meses: updatedMonths } : t))
+    )
+    setStartMonth(newStart)
+    setEndMonth(newEnd)
+    setItems(updatedItems)
+    setSelectedOrder((prev) => (prev ? { ...prev, snapshot_proyeccion: updatedSnapshot } : prev))
+    setAddMonthModalOpen(false)
+    setSuccessMsg(
+      `${toAdd.length === 1 ? 'Se agregó el mes' : `Se agregaron ${toAdd.length} meses:`} ${ordenarMeses(toAdd, updatedMonths[0]).join(', ')}. Guardado en la orden ${selectedOrder.numero_orden}.`
+    )
   }
 
   // Agregar nuevo producto a la matriz
@@ -1481,7 +1454,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     if (isOrderLocked) return
     if (!window.confirm(`¿Confirmas eliminar "${name}" de esta proyección?`)) return
     try {
-      await projectionService.deleteItem(id_item)
       const remainingItems = items.filter((i) => i.id_item !== id_item)
       setItems(remainingItems)
 
@@ -1503,11 +1475,6 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
           customColumns: activeTemplate?.columnas_personalizadas,
           estado_operativo: selectedOrder.estado
         }
-        projectionService.saveSnapshotToStorage(
-          selectedOrder.id_orden,
-          selectedOrder.numero_orden,
-          updatedSnapshot
-        )
         await projectionService.updateOrder(selectedOrder.id_orden, {
           numero_orden: selectedOrder.numero_orden,
           total_items: remainingItems.length,
@@ -1622,7 +1589,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
             role="alert"
             style={{
               borderColor: 'var(--color-danger)',
-              backgroundColor: '#FDF3F2',
+              backgroundColor: 'var(--color-status-red-bg)',
               color: 'var(--color-danger)'
             }}
           >
@@ -1635,7 +1602,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
             role="alert"
             style={{
               borderColor: 'var(--color-success)',
-              backgroundColor: '#F1F8F4',
+              backgroundColor: 'var(--color-status-green-bg)',
               color: 'var(--color-success)',
               display: 'flex',
               justifyContent: 'space-between',
@@ -1655,6 +1622,7 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
 
         <OrdersListSubView
           orders={orders}
+          templates={templates}
           onSelectOrder={handleSelectOrder}
           onCreateOrderClick={() => setNewOrderModalOpen(true)}
           onDeleteOrder={handleDeleteOrder}
@@ -1706,6 +1674,8 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
       <ProjectionMatrixSubView
         selectedOrder={selectedOrder}
+        saveState={saveState}
+        onRetrySave={() => setSaveRetry((n) => n + 1)}
         activeTemplate={activeTemplate}
         isOrderLocked={isOrderLocked}
         loading={loading}
@@ -1766,10 +1736,9 @@ export function ProjectionsPage({ onBack, onOpenReceptions }: ProjectionsPagePro
       <AddMonthModal
         isOpen={addMonthModalOpen}
         onClose={() => setAddMonthModalOpen(false)}
-        newMonthName={newMonthName}
-        setNewMonthName={setNewMonthName}
+        existingMonths={activeTemplate?.columnas_meses || []}
         isAdding={isAddingMonth}
-        onAdd={handleAddMonth}
+        onAdd={handleAddMonths}
       />
 
       <AddProductModal

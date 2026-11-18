@@ -1,26 +1,30 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import type { PalletRecord } from '../../../types/locations'
+import { MODO_INFO, formatoNumero, nombreEmpaque } from '../../products/empaque'
 import type { UnidadSerializada } from '../../products/types'
-import type { InventoryItem, PalletCountSummary, ProductOption } from '../types'
+import { calcularPresentacion } from '../presentacion'
+import type { InventoryItem, ProductOption } from '../types'
 
 type Props = {
   warehouseName?: string
   inventory: InventoryItem[]
   allProducts: ProductOption[]
   activePallets: PalletRecord[]
-  palletCountsMap: Map<number, PalletCountSummary>
   serialUnitsMap: Map<number, UnidadSerializada[]>
   loadingStock: boolean
   showZeroStock: boolean
   onToggleShowZeroStock: (show: boolean) => void
-  onOpenAdjustModal: (
-    productId: number,
-    isSerial: boolean,
-    paletasCompletas?: number,
-    cajasPuchos?: number
-  ) => void
+  /** Abre el ingreso de stock con el producto preseleccionado */
+  onIngresar: (productId: number) => void
+  /** Conteo físico absoluto (solo modo Por caja) */
+  onAjustarConteo: (productId: number) => void
   onInspectSerial: (product: ProductOption, units: UnidadSerializada[]) => void
-  onViewPallets: (sku: string) => void
+}
+
+const SEMAFORO: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  VERDE: { label: 'Óptimo', color: 'var(--color-success)', bg: 'var(--color-status-green-bg)', border: 'var(--color-status-green-border)' },
+  AMARILLO: { label: 'Stock bajo', color: 'var(--color-warning)', bg: 'var(--color-status-yellow-bg)', border: 'var(--color-status-yellow-border)' },
+  ROJO: { label: 'Crítico', color: 'var(--color-danger)', bg: 'var(--color-status-red-bg)', border: 'var(--color-status-red-border)' }
 }
 
 export function StockPalletsSubView({
@@ -28,424 +32,215 @@ export function StockPalletsSubView({
   inventory,
   allProducts,
   activePallets,
-  palletCountsMap,
   serialUnitsMap,
   loadingStock,
   showZeroStock,
   onToggleShowZeroStock,
-  onOpenAdjustModal,
-  onInspectSerial,
-  onViewPallets
+  onIngresar,
+  onAjustarConteo,
+  onInspectSerial
 }: Props) {
-  // Filtros reactivos internos para la vista
-  const [stockSearch, setStockSearch] = useState('')
-  const [stockCategoryFilter, setStockCategoryFilter] = useState('')
-  const [stockStatusFilter, setStockStatusFilter] = useState<'ALL' | 'VERDE' | 'AMARILLO' | 'ROJO'>('ALL')
+  const [search, setSearch] = useState('')
+  const [modoFilter, setModoFilter] = useState<'ALL' | 'PALETIZADO' | 'PICKING_CAJA' | 'SERIALIZADO'>('ALL')
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'VERDE' | 'AMARILLO' | 'ROJO'>('ALL')
+  const [expanded, setExpanded] = useState<number | null>(null)
 
-  // Categorías presentes en los productos con inventario
-  const categoriesList = useMemo(() => {
-    const set = new Set<string>()
-    for (const item of inventory) {
-      const cat = item.producto?.categoria?.nombre
-      if (cat) set.add(cat)
-    }
-    return Array.from(set).sort()
-  }, [inventory])
+  const productById = useMemo(() => new Map(allProducts.map((p) => [p.id_producto, p])), [allProducts])
 
-  // Segregación de inventario con existencias vs agotados
-  const { activeItems, zeroStockItems } = useMemo(() => {
-    const active: InventoryItem[] = []
-    const zero: InventoryItem[] = []
+  const filas = useMemo(
+    () =>
+      inventory.map((item) => {
+        const producto = productById.get(item.id_producto)
+        const pallets = activePallets.filter((p) => p.id_producto === item.id_producto)
+        const equipos = (serialUnitsMap.get(item.id_producto) || []).filter((u) => u.estado !== 'DESPACHADA' && u.estado !== 'BAJA')
+        const pres = calcularPresentacion(item, producto, pallets, equipos.length)
+        const stock = Number(item.stock_real) || 0
+        return { item, producto, pres, stock, equipos }
+      }),
+    [inventory, productById, activePallets, serialUnitsMap]
+  )
 
-    for (const item of inventory) {
-      const stock = Number(item.stock_real) || 0
-      const countSummary = palletCountsMap.get(item.id_producto)
-      const paletasFisicas = countSummary
-        ? (Number(countSummary.paletas_completas) || 0) + (Number(countSummary.puchos) || 0)
-        : activePallets.filter((p) => p.id_producto === item.id_producto).length
+  const conStock = filas.filter((f) => f.stock > 0 || f.pres.pallets.length > 0 || f.equipos.length > 0)
+  const sinStock = filas.length - conStock.length
+  const visibles = showZeroStock ? filas : conStock
 
-      if (stock > 0 || paletasFisicas > 0) {
-        active.push(item)
-      } else {
-        zero.push(item)
-      }
-    }
-    return { activeItems: active, zeroStockItems: zero }
-  }, [inventory, palletCountsMap, activePallets])
-
-  const displayedInventory = showZeroStock ? inventory : activeItems
-
-  // Filtrado reactivo en tiempo real
-  const filteredStockItems = useMemo(() => {
-    return displayedInventory.filter((item) => {
-      if (stockCategoryFilter && item.producto?.categoria?.nombre !== stockCategoryFilter) {
-        return false
-      }
-      if (stockStatusFilter !== 'ALL' && item.estado_semaforo !== stockStatusFilter) {
-        return false
-      }
-      if (stockSearch) {
-        const query = stockSearch.toLowerCase().trim()
-        const skuMatch = item.producto?.sku?.toLowerCase().includes(query)
-        const nameMatch = item.producto?.nombre?.toLowerCase().includes(query)
-        if (!skuMatch && !nameMatch) return false
-      }
-      return true
-    })
-  }, [displayedInventory, stockCategoryFilter, stockStatusFilter, stockSearch])
+  const filtradas = visibles.filter(({ item, pres }) => {
+    if (modoFilter !== 'ALL' && pres.modo !== modoFilter) return false
+    if (statusFilter !== 'ALL' && item.estado_semaforo !== statusFilter) return false
+    const q = search.trim().toLowerCase()
+    if (q && !item.producto?.sku?.toLowerCase().includes(q) && !item.producto?.nombre?.toLowerCase().includes(q)) return false
+    return true
+  })
 
   return (
     <div className="panel" style={{ padding: '20px' }}>
-      {/* Barra de Filtros y Búsqueda Efferd */}
       <div className="table-controls">
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
-          <div className="search-group" style={{ flex: '1 1 240px', maxWidth: '380px' }}>
+          <div className="search-group" style={{ flex: '1 1 240px', maxWidth: '360px' }}>
             <input
-              type="text"
-              placeholder="Buscar por SKU o descripción..."
-              value={stockSearch}
-              onChange={(e) => setStockSearch(e.target.value)}
+              type="search"
+              placeholder="Buscar por SKU o nombre…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%' }}
+              aria-label="Buscar producto"
             />
           </div>
-
           <div className="filter-group">
-            <label htmlFor="cat-filter">Categoría:</label>
-            <select
-              id="cat-filter"
-              value={stockCategoryFilter}
-              onChange={(e) => setStockCategoryFilter(e.target.value)}
-            >
-              <option value="">Todas las categorías</option>
-              {categoriesList.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
+            <label htmlFor="modo-filter">Modo:</label>
+            <select id="modo-filter" value={modoFilter} onChange={(e) => setModoFilter(e.target.value as typeof modoFilter)}>
+              <option value="ALL">Todos</option>
+              <option value="PALETIZADO">Paletizado</option>
+              <option value="PICKING_CAJA">Por caja</option>
+              <option value="SERIALIZADO">Serializado</option>
             </select>
           </div>
-
           <div className="filter-group">
-            <label htmlFor="status-filter">Semáforo:</label>
-            <select
-              id="status-filter"
-              value={stockStatusFilter}
-              onChange={(e) => setStockStatusFilter(e.target.value as any)}
-            >
-              <option value="ALL">Todos los estados</option>
-              <option value="VERDE">Óptimo (verde)</option>
-              <option value="AMARILLO">Stock bajo (amarillo)</option>
-              <option value="ROJO">Crítico (rojo)</option>
+            <label htmlFor="status-filter">Estado:</label>
+            <select id="status-filter" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
+              <option value="ALL">Todos</option>
+              <option value="VERDE">Óptimo</option>
+              <option value="AMARILLO">Stock bajo</option>
+              <option value="ROJO">Crítico</option>
             </select>
           </div>
-
-          {(stockSearch || stockCategoryFilter || stockStatusFilter !== 'ALL') && (
-            <button
-              type="button"
-              className="btn-detail"
-              onClick={() => {
-                setStockSearch('')
-                setStockCategoryFilter('')
-                setStockStatusFilter('ALL')
-              }}
-              style={{ padding: '6px 12px' }}
-            >
-              Limpiar filtros
-            </button>
-          )}
         </div>
-
-        {zeroStockItems.length > 0 && (
-          <label
-            style={{
-              fontSize: '13px',
-              color: 'var(--color-text-secondary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: 'pointer',
-              userSelect: 'none'
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={showZeroStock}
-              onChange={(e) => onToggleShowZeroStock(e.target.checked)}
-              style={{ cursor: 'pointer' }}
-            />
-            <span>Mostrar productos sin existencias ({zeroStockItems.length})</span>
+        {sinStock > 0 && (
+          <label className="check" style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+            <input type="checkbox" checked={showZeroStock} onChange={(e) => onToggleShowZeroStock(e.target.checked)} />
+            Mostrar productos sin existencias ({sinStock})
           </label>
         )}
       </div>
 
-      <div style={{ marginBottom: '10px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-        Mostrando <strong>{filteredStockItems.length}</strong> de {displayedInventory.length} productos en {warehouseName || 'la sede'}.
-      </div>
+      <p className="muted" style={{ margin: '0 0 10px', fontSize: '13px' }}>
+        Mostrando <strong>{filtradas.length}</strong> de {visibles.length} productos en {warehouseName || 'la sede'}.
+      </p>
 
       {loadingStock ? (
-        <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>
-          Cargando existencias del almacén…
+        <p className="muted" style={{ padding: '24px 0', textAlign: 'center' }}>Cargando existencias…</p>
+      ) : filtradas.length === 0 ? (
+        <p className="empty-state">
+          {visibles.length === 0
+            ? `${warehouseName || 'Esta sede'} aún no tiene existencias. Usa “Ingresar stock” para registrar la primera.`
+            : 'Ningún producto coincide con los filtros.'}
         </p>
-      ) : filteredStockItems.length === 0 ? (
-        <div className="empty-state" style={{ textAlign: 'center', padding: '36px' }}>
-          <p style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--color-brand-deep)', margin: '0 0 8px' }}>
-            Sin existencias coincidentes en {warehouseName || 'este almacén'}
-          </p>
-          <p className="muted" style={{ margin: 0 }}>
-            {zeroStockItems.length > 0 && !showZeroStock
-              ? `Hay ${zeroStockItems.length} productos sin existencias en este almacén. Marca la casilla "Mostrar productos sin existencias" para visualizarlos.`
-              : 'No se encontraron registros con los filtros seleccionados o este almacén aún no tiene stock cargado.'}
-          </p>
-        </div>
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>SKU y producto</th>
-                <th>Categoría</th>
-                <th>Paletas completas</th>
-                <th>Puchos (cajas)</th>
+                <th>Producto</th>
+                <th>Categoría y modo</th>
+                <th>Presentación</th>
                 <th className="num-col">Stock total</th>
-                <th className="num-col">Volumen estimado</th>
-                <th style={{ textAlign: 'center' }}>Estado de stock</th>
+                <th>Estado</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {filteredStockItems.map((item) => {
-                const stock = Number(item.stock_real) || 0
-                const prodOpt = allProducts.find((p) => p.id_producto === item.id_producto)
-                const isSerialItem =
-                  prodOpt?.modo_manejo === 'SERIALIZADO' ||
-                  item.producto?.categoria?.modo_manejo === 'SERIALIZADO' ||
-                  serialUnitsMap.has(item.id_producto)
-                const prodUnits = serialUnitsMap.get(item.id_producto) || []
-
-                const r = Array.isArray(item.producto?.regla_empaque)
-                  ? item.producto.regla_empaque[0]
-                  : item.producto?.regla_empaque
-
-                const uCaja = Math.max(1, r?.unidades_por_caja || 1)
-                const cCamada = Math.max(1, r?.cajas_por_camada || r?.cajas_por_camita || 1)
-                const nCamadas = Math.max(1, r?.numero_camadas || r?.camitas_por_paleta || 1)
-                const cPaleta = cCamada * nCamadas
-
-                const totalCajas = Math.floor(stock / uCaja)
-                const countSummary = palletCountsMap.get(item.id_producto)
-                const prodPallets = activePallets.filter((p) => p.id_producto === item.id_producto)
-                const paletasCompletas = countSummary
-                  ? Number(countSummary.paletas_completas) || 0
-                  : prodPallets.filter((p) => p.tipo_paleta === 'COMPLETO').length
-                const puchosCount = countSummary
-                  ? Number(countSummary.puchos) || 0
-                  : prodPallets.filter((p) => p.tipo_paleta === 'PUCHO').length
-                const cajasPuchos = prodPallets
-                  .filter((p) => p.tipo_paleta === 'PUCHO')
-                  .reduce((acc, p) => acc + (Number(p.cantidad_paquetes) || 1), 0)
-                const totalPaletasFisicas = paletasCompletas + puchosCount
-
-                let volM3 = r?.volumen_caja_m3 ? totalCajas * Number(r.volumen_caja_m3) : null
-                if (isSerialItem && prodOpt?.largo_cm && prodOpt?.ancho_cm && prodOpt?.alto_cm) {
-                  volM3 = stock * ((prodOpt.largo_cm * prodOpt.ancho_cm * prodOpt.alto_cm) / 1000000)
-                }
-
+              {filtradas.map(({ item, producto, pres, stock, equipos }) => {
+                const sem = SEMAFORO[item.estado_semaforo] ?? SEMAFORO.ROJO
+                const descuadre = pres.modo === 'PALETIZADO' && pres.pallets.length > 0 && Math.abs(pres.unidadesEnPaletas - stock) > 0.001
+                const abierto = expanded === item.id_producto
                 return (
-                  <tr key={item.id_inventario}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Fragment key={item.id_producto}>
+                    <tr>
+                      <td>
                         <span className="sku-badge">{item.producto?.sku}</span>
-                        <strong>{item.producto?.nombre}</strong>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="category-pill">
-                        {item.producto?.categoria?.nombre ?? 'General'}
-                      </span>
-                    </td>
-                    <td>
-                      {isSerialItem ? (
-                        <div>
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '2px 7px',
-                              borderRadius: '4px',
-                              fontSize: '11.5px',
-                              fontWeight: 600,
-                              background: 'var(--color-brand-soft)',
-                              color: 'var(--color-brand)',
-                              border: '1px solid var(--color-border)'
-                            }}
-                          >
-                            Serializado unitario
-                          </span>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                            {prodUnits.length} {prodUnits.length === 1 ? 'equipo registrado' : 'equipos registrados'}
+                        <div style={{ fontWeight: 600, marginTop: '4px' }}>{item.producto?.nombre}</div>
+                      </td>
+                      <td>
+                        <div><span className="category-pill">{producto?.categoria_nombre ?? item.producto?.categoria?.nombre ?? 'Sin categoría'}</span></div>
+                        <span className="modo-pill" style={{ marginTop: '4px' }}>{MODO_INFO[pres.modo].label}</span>
+                      </td>
+                      <td>
+                        <strong>{pres.principal}</strong>
+                        {pres.detalle && <div className="muted" style={{ fontSize: '13px' }}>{pres.detalle}</div>}
+                        {producto && !producto.tiene_regla && pres.modo !== 'SERIALIZADO' && (
+                          <div style={{ fontSize: '13px', color: 'var(--color-warning)' }}>Falta regla de empaque</div>
+                        )}
+                      </td>
+                      <td className="num-col">
+                        <strong>{formatoNumero(stock)}</strong> <span className="muted" style={{ fontSize: '13px' }}>u</span>
+                        {item.sin_registro && (
+                          <div style={{ fontSize: '12px', color: 'var(--color-warning)' }}>Sin registro de inventario</div>
+                        )}
+                        {descuadre && !item.sin_registro && (
+                          <div style={{ fontSize: '12px', color: 'var(--color-warning)' }} title="El stock registrado no coincide con la suma de las paletas activas">
+                            Paletas suman {formatoNumero(pres.unidadesEnPaletas)} u
                           </div>
-                          <div
-                            style={{
-                              fontSize: '11.5px',
-                              marginTop: '1px',
-                              fontWeight: 600,
-                              color: prodUnits.length > 0 ? 'var(--color-success)' : 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {prodUnits.length > 0 ? `${prodUnits.length} con tag activo` : 'Sin chips enrolados'}
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <strong
-                            style={{
-                              fontSize: '14px',
-                              color: paletasCompletas > 0 ? 'var(--color-brand)' : 'var(--color-text-primary)'
-                            }}
-                          >
-                            {paletasCompletas} {paletasCompletas === 1 ? 'paleta' : 'paletas'}
-                          </strong>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                            ({paletasCompletas * cPaleta} cajas)
-                          </div>
-                          <div
-                            style={{
-                              fontSize: '11.5px',
-                              marginTop: '1px',
-                              fontWeight: 600,
-                              color: paletasCompletas > 0 ? 'var(--color-brand)' : 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {paletasCompletas > 0 ? `${paletasCompletas} con tag activo` : '0 completas activas'}
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {isSerialItem ? (
-                        <span style={{ fontSize: '12.5px', color: 'var(--color-text-secondary)' }}>
-                          No aplica
+                        )}
+                      </td>
+                      <td>
+                        <span className="category-pill" style={{ background: sem.bg, color: sem.color, borderColor: sem.border }}>
+                          {sem.label}
                         </span>
-                      ) : (
-                        <div>
-                          <span style={{ fontWeight: 600, color: puchosCount > 0 ? 'var(--color-warning)' : 'inherit' }}>
-                            {puchosCount > 0 ? `${cajasPuchos} cajas (${puchosCount} pucho)` : '0 cajas'}
-                          </span>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                            ({cajasPuchos * uCaja} unid.)
-                          </div>
-                          {puchosCount > 1 && (
-                            <div style={{ fontSize: '11px', color: 'var(--color-warning)', fontWeight: 600, marginTop: '2px' }}>
-                              {puchosCount} puchos (unificar)
-                            </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button className="btn-detail" type="button" onClick={() => onIngresar(item.id_producto)}>
+                            Ingresar
+                          </button>
+                          {pres.modo === 'PALETIZADO' && (
+                            <button
+                              className="btn-detail"
+                              type="button"
+                              aria-expanded={abierto}
+                              onClick={() => setExpanded(abierto ? null : item.id_producto)}
+                              disabled={pres.pallets.length === 0}
+                            >
+                              {abierto ? 'Ocultar paletas' : `Paletas (${pres.pallets.length})`}
+                            </button>
+                          )}
+                          {pres.modo === 'PICKING_CAJA' && (
+                            <button className="btn-detail" type="button" onClick={() => onAjustarConteo(item.id_producto)}>
+                              Ajustar conteo
+                            </button>
+                          )}
+                          {pres.modo === 'SERIALIZADO' && producto && (
+                            <button className="btn-detail" type="button" onClick={() => onInspectSerial(producto, equipos)}>
+                              Equipos ({equipos.length})
+                            </button>
                           )}
                         </div>
-                      )}
-                    </td>
-                    <td className="num-col">
-                      <strong style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
-                        {stock.toLocaleString()}
-                      </strong>{' '}
-                      <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                        {item.producto?.unidad_medida ?? 'UNID'}
-                      </span>
-                    </td>
-                    <td className="num-col">
-                      {volM3 ? `${volM3.toFixed(3)} m³` : '—'}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          fontSize: '11.5px',
-                          fontWeight: 600,
-                          background:
-                            item.estado_semaforo === 'VERDE'
-                              ? 'rgba(47, 125, 79, 0.1)'
-                              : item.estado_semaforo === 'AMARILLO'
-                              ? 'rgba(188, 121, 31, 0.1)'
-                              : 'rgba(179, 64, 42, 0.1)',
-                          color:
-                            item.estado_semaforo === 'VERDE'
-                              ? 'var(--color-success)'
-                              : item.estado_semaforo === 'AMARILLO'
-                              ? 'var(--color-warning)'
-                              : 'var(--color-danger)',
-                          border: `1px solid ${
-                            item.estado_semaforo === 'VERDE'
-                              ? 'rgba(47, 125, 79, 0.28)'
-                              : item.estado_semaforo === 'AMARILLO'
-                              ? 'rgba(188, 121, 31, 0.28)'
-                              : 'rgba(179, 64, 42, 0.28)'
-                          }`
-                        }}
-                      >
-                        {item.estado_semaforo === 'VERDE'
-                          ? 'Óptimo'
-                          : item.estado_semaforo === 'AMARILLO'
-                          ? 'Stock bajo'
-                          : 'Crítico'}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          className="btn-detail"
-                          type="button"
-                          onClick={() => {
-                            onOpenAdjustModal(
-                              item.id_producto,
-                              isSerialItem,
-                              paletasCompletas,
-                              cajasPuchos
-                            )
-                          }}
-                        >
-                          Ajustar stock
-                        </button>
-                        {isSerialItem ? (
-                          <button
-                            className="btn-detail"
-                            type="button"
-                            onClick={() => {
-                              if (prodOpt) {
-                                onInspectSerial(prodOpt, prodUnits)
-                              }
-                            }}
-                            style={{
-                              color: prodUnits.length > 0 ? 'var(--color-brand)' : 'var(--color-text-secondary)',
-                              borderColor: prodUnits.length > 0 ? undefined : 'var(--color-border)'
-                            }}
-                            title={
-                              prodUnits.length > 0
-                                ? `Ver los ${prodUnits.length} equipos serializados en almacén`
-                                : 'No hay equipos registrados con serie en este almacén'
-                            }
-                          >
-                            {prodUnits.length > 0 ? `Ver equipos (${prodUnits.length})` : 'Equipos seriales (0)'}
-                          </button>
-                        ) : (
-                          <button
-                            className="btn-detail"
-                            type="button"
-                            onClick={() => onViewPallets(item.producto?.sku || '')}
-                            style={{
-                              color: totalPaletasFisicas > 0 ? 'var(--color-brand)' : 'var(--color-text-secondary)',
-                              borderColor: totalPaletasFisicas > 0 ? undefined : 'var(--color-border)'
-                            }}
-                            title={
-                              totalPaletasFisicas > 0
-                                ? `Ver las ${totalPaletasFisicas} paletas físicas con tag RFID en almacén`
-                                : 'No hay paletas físicas con tag RFID para este producto'
-                            }
-                          >
-                            {totalPaletasFisicas > 0 ? `Ver paletas (${totalPaletasFisicas})` : 'Paletas físicas (0)'}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {abierto && (
+                      <tr>
+                        <td colSpan={6} style={{ background: 'var(--color-canvas)' }}>
+                          <table style={{ margin: 0 }}>
+                            <thead>
+                              <tr>
+                                <th>Tag RFID</th>
+                                <th>Tipo</th>
+                                <th>Contenido</th>
+                                <th className="num-col">Unidades</th>
+                                <th>Ubicación</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pres.pallets.map((p) => {
+                                const sueltas = Number(p.unidades_sueltas) || 0
+                                return (
+                                  <tr key={p.id_etiqueta}>
+                                    <td><span className="sku-badge">{p.uid_tag}</span></td>
+                                    <td>{p.tipo_paleta === 'COMPLETO' ? 'Paleta completa' : 'Pucho'}</td>
+                                    <td>
+                                      {formatoNumero(Number(p.cantidad_paquetes) || 0)} {nombreEmpaque(producto?.tipo_empaque, Number(p.cantidad_paquetes))}
+                                      {sueltas > 0 && ` + ${formatoNumero(sueltas)} u sueltas`}
+                                    </td>
+                                    <td className="num-col">{formatoNumero(Number(p.cantidad_actual) || 0)}</td>
+                                    <td>{p.codigo_ubicacion ?? 'Sin ubicación'}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 )
               })}
             </tbody>

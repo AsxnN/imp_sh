@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
+import { EmpaqueJerarquia } from './components/EmpaqueJerarquia'
+import { MODO_INFO, TIPOS_EMPAQUE, capitalizar, formatoNumero, leerRegla, nombreEmpaque, normalizarModo } from './empaque'
 import { unidadSerializadaRepository } from './repositories/SerialUnitRepository'
+import { getEstrategiaManejo } from './strategies/RegistroEstrategias'
 import {
   getProductRule,
   getProductSerialProfile,
@@ -38,23 +41,23 @@ export function ProductDetailModal({
     [product]
   )
 
-  const modoManejo = product?.categoria?.modo_manejo || 'PALETIZADO'
+  const modoManejo = normalizarModo(product?.categoria?.modo_manejo)
   const isSerializado = modoManejo === 'SERIALIZADO'
+  const usaPaleta = modoManejo === 'PALETIZADO'
 
-  // Unidades serializadas físicas
+  // Unidades serializadas físicas (identificadas solo por número de serie)
   const [unidadesSeriales, setUnidadesSeriales] = useState<UnidadSerializada[]>([])
   const [loadingUnidades, setLoadingUnidades] = useState(false)
   const [showAddUnidad, setShowAddUnidad] = useState(false)
   const [nuevaSerie, setNuevaSerie] = useState('')
-  const [nuevoTagRfid, setNuevoTagRfid] = useState('')
   const [guardandoUnidad, setGuardandoUnidad] = useState(false)
   const [errorUnidad, setErrorUnidad] = useState<string | null>(null)
 
-  // Formulario de empaque (paletizado)
+  // Formulario de empaque (paletizado o por caja)
+  const [formTipo, setFormTipo] = useState('CAJA')
   const [formUnits, setFormUnits] = useState('1')
   const [formBoxesLayer, setFormBoxesLayer] = useState('1')
   const [formLayers, setFormLayers] = useState('1')
-  const [formPuchos, setFormPuchos] = useState(true)
   const [formNotes, setFormNotes] = useState('')
   const [formLargo, setFormLargo] = useState('')
   const [formAncho, setFormAncho] = useState('')
@@ -64,20 +67,20 @@ export function ProductDetailModal({
   // Sincronizar formulario con los datos existentes al abrir
   useEffect(() => {
     if (rule) {
+      setFormTipo(rule.tipo_empaque || 'CAJA')
       setFormUnits(String(rule.unidades_por_caja ?? 1))
       setFormBoxesLayer(String(rule.cajas_por_camada ?? 1))
       setFormLayers(String(rule.numero_camadas ?? 1))
-      setFormPuchos(rule.permite_puchos ?? true)
       setFormNotes(rule.notas_armado ?? '')
       setFormLargo(rule.largo_caja_cm ? String(rule.largo_caja_cm) : '')
       setFormAncho(rule.ancho_caja_cm ? String(rule.ancho_caja_cm) : '')
       setFormAlto(rule.alto_caja_cm ? String(rule.alto_caja_cm) : '')
       setFormPeso(rule.peso_caja_kg ? String(rule.peso_caja_kg) : '')
     } else {
+      setFormTipo('CAJA')
       setFormUnits('1')
       setFormBoxesLayer('1')
       setFormLayers('1')
-      setFormPuchos(true)
       setFormNotes('')
       setFormLargo('')
       setFormAncho('')
@@ -142,11 +145,12 @@ export function ProductDetailModal({
 
   if (!product) return null
 
-  const cajasPaleta = rule
-    ? (rule.cajas_por_camada ?? rule.cajas_por_camita ?? 0) *
-      (rule.numero_camadas ?? rule.camitas_por_paleta ?? 0)
-    : 0
-  const unidadesPaleta = rule ? cajasPaleta * rule.unidades_por_caja : 0
+  const regla = leerRegla(rule)
+  const cajasPaleta = regla.empaquesPorPaleta
+  const empSingular = nombreEmpaque(regla.tipoEmpaque, 1)
+  const empPlural = nombreEmpaque(regla.tipoEmpaque, 2)
+  const formSingular = nombreEmpaque(formTipo, 1)
+  const formPlural = nombreEmpaque(formTipo, 2)
   const volumenCajaM3 =
     rule?.largo_caja_cm && rule?.ancho_caja_cm && rule?.alto_caja_cm
       ? (rule.largo_caja_cm * rule.ancho_caja_cm * rule.alto_caja_cm) / 1000000
@@ -170,38 +174,26 @@ export function ProductDetailModal({
     setSavingPacking(true)
     setPackingError(null)
 
-    const uCaja = Math.max(1, Number(formUnits) || 1)
-    const cCamada = Math.max(1, Number(formBoxesLayer) || 1)
-    const nCamadas = Math.max(1, Number(formLayers) || 1)
-
-    const payload = {
-      id_producto: Number(product.id_producto),
-      unidades_por_caja: uCaja,
-      cajas_por_camada: cCamada,
-      numero_camadas: nCamadas,
-      permite_puchos: formPuchos,
-      notas_armado: formNotes.trim() || null,
-      largo_caja_cm: formLargo ? Number(formLargo) : null,
-      ancho_caja_cm: formAncho ? Number(formAncho) : null,
-      alto_caja_cm: formAlto ? Number(formAlto) : null,
-      peso_caja_kg: formPeso ? Number(formPeso) : null,
-      cajas_por_camita: cCamada,
-      camitas_por_paleta: nCamadas
-    }
-
-    const { error: upsertErr } = await supabase
-      .from('regla_empaque')
-      .upsert(payload, { onConflict: 'id_producto' })
-
-    setSavingPacking(false)
-
-    if (upsertErr) {
-      setPackingError(upsertErr.message)
-    } else {
+    try {
+      // Misma lógica de guardado que el formulario de productos (estrategia del modo)
+      await getEstrategiaManejo(modoManejo).guardarPerfil(product.id_producto, {
+        tipo_empaque: formTipo,
+        unidades_por_caja: formUnits,
+        cajas_por_camada: formBoxesLayer,
+        numero_camadas: formLayers,
+        permite_puchos: usaPaleta,
+        notas_armado: formNotes,
+        largo_caja_cm: formLargo,
+        ancho_caja_cm: formAncho,
+        alto_caja_cm: formAlto,
+        peso_caja_kg: formPeso
+      })
       setEditingPacking(false)
-      if (onPackagingUpdated) {
-        onPackagingUpdated()
-      }
+      onPackagingUpdated?.()
+    } catch (err: unknown) {
+      setPackingError(err instanceof Error ? err.message : 'Error al guardar el empaque.')
+    } finally {
+      setSavingPacking(false)
     }
   }
 
@@ -213,37 +205,15 @@ export function ProductDetailModal({
     setErrorUnidad(null)
 
     try {
-      let idEtiqueta: number | null = null
-      if (nuevoTagRfid.trim()) {
-        const { data: tagData, error: tagErr } = await supabase
-          .from('etiqueta_rfid')
-          .insert({
-            uid_tag: nuevoTagRfid.trim(),
-            id_producto: Number(product.id_producto),
-            tipo_paleta: 'COMPLETO',
-            cantidad_paquetes: 1,
-            cantidad_actual: 1,
-            estado: 'ACTIVA',
-            notas: `Serie: ${nuevaSerie.trim()}`
-          })
-          .select('id_etiqueta')
-          .single()
-
-        if (tagErr) {
-          throw new Error(`Error al vincular tag RFID: ${tagErr.message}`)
-        }
-        idEtiqueta = tagData?.id_etiqueta ?? null
-      }
-
+      // La maquinaria se identifica solo por número de serie (sin tag RFID)
       await unidadSerializadaRepository.guardar({
         id_producto: product.id_producto,
         numero_serie: nuevaSerie.trim(),
-        id_etiqueta: idEtiqueta,
+        id_etiqueta: null,
         estado: 'DISPONIBLE'
       })
 
       setNuevaSerie('')
-      setNuevoTagRfid('')
       setShowAddUnidad(false)
 
       const updatedList = await unidadSerializadaRepository.obtenerPorProducto(product.id_producto)
@@ -269,16 +239,8 @@ export function ProductDetailModal({
               <span className="muted" style={{ fontSize: '0.85rem' }}>
                 Categoría: <strong>{product.categoria?.nombre ?? 'Sin categoría'}</strong>
               </span>
-              <span
-                className="category-pill"
-                style={{
-                  background: isSerializado ? '#fef3c7' : '#e0f2fe',
-                  color: isSerializado ? '#92400e' : '#0369a1',
-                  borderColor: isSerializado ? '#fde68a' : '#bae6fd',
-                  fontSize: '0.75rem'
-                }}
-              >
-                {isSerializado ? 'Serializado unitario' : 'Paletizado estándar'}
+              <span className="modo-pill" title={MODO_INFO[modoManejo].resumen}>
+                {MODO_INFO[modoManejo].label}
               </span>
             </div>
           </div>
@@ -308,8 +270,8 @@ export function ProductDetailModal({
               <h4>Ficha técnica de maquinaria y equipo</h4>
               <div className="detail-stats-grid">
                 <div className="stat-box highlight">
-                  <span>Modo operativo</span>
-                  <strong>Serializado unitario</strong>
+                  <span>Modo de manejo</span>
+                  <strong>Serializado (por número de serie)</strong>
                 </div>
                 <div className="stat-box">
                   <span>Peso unitario</span>
@@ -361,7 +323,7 @@ export function ProductDetailModal({
                   type="button"
                   onClick={() => setShowAddUnidad(!showAddUnidad)}
                 >
-                  {showAddUnidad ? 'Cancelar' : '+ Enrolar unidad'}
+                  {showAddUnidad ? 'Cancelar' : '+ Registrar unidad'}
                 </button>
               </div>
 
@@ -383,29 +345,19 @@ export function ProductDetailModal({
                     marginBottom: '16px'
                   }}
                 >
-                  <h5 style={{ margin: '0 0 10px', fontSize: '0.9rem' }}>Enrolar nueva unidad serializada</h5>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px' }}>
-                    <label>
-                      Número de serie (único)
-                      <input
-                        value={nuevaSerie}
-                        onChange={(e) => setNuevaSerie(e.target.value)}
-                        placeholder="Ej. SN-GEN-2026-0042"
-                        required
-                      />
-                    </label>
-                    <label>
-                      Código tag RFID (opcional)
-                      <input
-                        value={nuevoTagRfid}
-                        onChange={(e) => setNuevoTagRfid(e.target.value)}
-                        placeholder="Ej. IMP00042 o EPC"
-                      />
-                    </label>
-                  </div>
+                  <h5 style={{ margin: '0 0 10px', fontSize: '0.9rem' }}>Registrar nueva unidad</h5>
+                  <label style={{ maxWidth: '360px' }}>
+                    Número de serie de fábrica (único)
+                    <input
+                      value={nuevaSerie}
+                      onChange={(e) => setNuevaSerie(e.target.value)}
+                      placeholder="Ej. SN-GEN-2026-0042"
+                      required
+                    />
+                  </label>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                     <button className="button" style={{ margin: 0 }} disabled={guardandoUnidad}>
-                      {guardandoUnidad ? 'Enrolando…' : 'Guardar unidad'}
+                      {guardandoUnidad ? 'Guardando…' : 'Guardar unidad'}
                     </button>
                     <button
                       className="button secondary"
@@ -422,41 +374,32 @@ export function ProductDetailModal({
               {loadingUnidades ? (
                 <p className="muted">Cargando unidades serializadas…</p>
               ) : unidadesSeriales.length === 0 ? (
-                <p className="empty-state">No hay unidades serializadas enroladas para este equipo.</p>
+                <p className="empty-state">No hay unidades registradas para este equipo.</p>
               ) : (
                 <div className="table-wrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>Número de Serie</th>
-                        <th>Tag RFID</th>
-                        <th>Almacén Actual</th>
+                        <th>Número de serie</th>
+                        <th>Almacén actual</th>
                         <th>Estado</th>
-                        <th>Fecha Ingreso</th>
+                        <th>Fecha de ingreso</th>
                       </tr>
                     </thead>
                     <tbody>
                       {unidadesSeriales.map((u) => (
                         <tr key={u.id_unidad}>
                           <td><strong>{u.numero_serie}</strong></td>
-                          <td>
-                            {u.etiqueta_rfid?.uid_tag ? (
-                              <span className="sku-badge">{u.etiqueta_rfid.uid_tag}</span>
-                            ) : (
-                              <span className="muted">Sin RFID</span>
-                            )}
-                          </td>
                           <td>{u.almacen?.nombre ?? '—'}</td>
                           <td>
                             <span
                               className="category-pill"
                               style={{
-                                background: u.estado === 'DISPONIBLE' ? '#dcfce7' : '#fee2e2',
-                                color: u.estado === 'DISPONIBLE' ? '#166534' : '#991b1b',
-                                fontSize: '0.75rem'
+                                background: u.estado === 'DISPONIBLE' ? 'var(--color-status-green-bg)' : 'var(--color-status-yellow-bg)',
+                                color: u.estado === 'DISPONIBLE' ? 'var(--color-success)' : 'var(--color-warning)'
                               }}
                             >
-                              {u.estado}
+                              {capitalizar(u.estado.toLowerCase().replace(/_/g, ' '))}
                             </span>
                           </td>
                           <td style={{ fontSize: '0.82rem' }}>
@@ -478,7 +421,7 @@ export function ProductDetailModal({
             {!rule && !editingPacking ? (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
                 <p className="empty-state" style={{ margin: '0 0 18px' }}>
-                  Este producto no cuenta con regla de empaque asignada.
+                  Este producto aún no tiene regla de empaque.
                 </p>
                 <button
                   className="button"
@@ -486,59 +429,86 @@ export function ProductDetailModal({
                   style={{ margin: 0 }}
                   onClick={() => setEditingPacking(true)}
                 >
-                  + Asignar regla de empaque ahora
+                  + Asignar regla de empaque
                 </button>
               </div>
             ) : editingPacking ? (
               <form className="product-form" onSubmit={handleSavePackaging}>
                 <h4>{rule ? 'Editar regla de empaque' : 'Asignar regla de empaque'}</h4>
                 <fieldset>
-                  <legend>Especificaciones de Paletizado</legend>
+                  <legend>{usaPaleta ? 'Empaque y paletizado' : 'Empaque (por caja)'}</legend>
                   <div className="number-grid">
                     <label>
-                      Unidades por caja
+                      Tipo de empaque
+                      <select value={formTipo} onChange={(e) => setFormTipo(e.target.value)}>
+                        {TIPOS_EMPAQUE.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {capitalizar(t.singular)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Unidades por {formSingular}
                       <input
                         type="number"
                         min="1"
+                        step="1"
                         value={formUnits}
                         onChange={(e) => setFormUnits(e.target.value)}
                         required
                       />
                     </label>
-                    <label>
-                      Cajas por camada
-                      <input
-                        type="number"
-                        min="1"
-                        value={formBoxesLayer}
-                        onChange={(e) => setFormBoxesLayer(e.target.value)}
-                        required
-                      />
-                    </label>
-                    <label>
-                      Camadas por paleta
-                      <input
-                        type="number"
-                        min="1"
-                        value={formLayers}
-                        onChange={(e) => setFormLayers(e.target.value)}
-                        required
-                      />
-                    </label>
+                    {usaPaleta && (
+                      <>
+                        <label>
+                          {capitalizar(formPlural)} por fila
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={formBoxesLayer}
+                            onChange={(e) => setFormBoxesLayer(e.target.value)}
+                            required
+                          />
+                        </label>
+                        <label>
+                          Filas por paleta
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={formLayers}
+                            onChange={(e) => setFormLayers(e.target.value)}
+                            required
+                          />
+                        </label>
+                      </>
+                    )}
                   </div>
 
-                  <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
-                    Notas de patrón de armado (opcional)
-                    <input
-                      value={formNotes}
-                      onChange={(e) => setFormNotes(e.target.value)}
-                      placeholder="Ej. 6 cajas horizontales + 2 verticales"
-                    />
-                  </label>
+                  <EmpaqueJerarquia
+                    tipoEmpaque={formTipo}
+                    unidadesPorEmpaque={formUnits}
+                    empaquesPorFila={formBoxesLayer}
+                    filasPorPaleta={formLayers}
+                    usaPaleta={usaPaleta}
+                  />
+
+                  {usaPaleta && (
+                    <label style={{ display: 'grid', gap: '6px', margin: '12px 0 0', fontWeight: 600, fontSize: '0.85rem' }}>
+                      Notas del patrón de armado (opcional)
+                      <input
+                        value={formNotes}
+                        onChange={(e) => setFormNotes(e.target.value)}
+                        placeholder="Ej. 6 cajas horizontales + 2 verticales"
+                      />
+                    </label>
+                  )}
 
                   <div className="number-grid" style={{ marginTop: '12px' }}>
                     <label>
-                      Largo caja (cm)
+                      Largo (cm)
                       <input
                         type="number"
                         min="0"
@@ -548,7 +518,7 @@ export function ProductDetailModal({
                       />
                     </label>
                     <label>
-                      Ancho caja (cm)
+                      Ancho (cm)
                       <input
                         type="number"
                         min="0"
@@ -558,7 +528,7 @@ export function ProductDetailModal({
                       />
                     </label>
                     <label>
-                      Alto caja (cm)
+                      Alto (cm)
                       <input
                         type="number"
                         min="0"
@@ -568,7 +538,7 @@ export function ProductDetailModal({
                       />
                     </label>
                     <label>
-                      Peso caja (kg)
+                      Peso (kg)
                       <input
                         type="number"
                         min="0"
@@ -577,22 +547,6 @@ export function ProductDetailModal({
                         onChange={(e) => setFormPeso(e.target.value)}
                       />
                     </label>
-                  </div>
-
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={formPuchos}
-                      onChange={(e) => setFormPuchos(e.target.checked)}
-                    />
-                    Permite cajas pucho (fraccionadas)
-                  </label>
-
-                  <div className="metrics">
-                    <span>{Number(formBoxesLayer) * Number(formLayers)} cajas/paleta</span>
-                    <strong>
-                      {Number(formBoxesLayer) * Number(formLayers) * Number(formUnits)} unidades/paleta
-                    </strong>
                   </div>
                 </fieldset>
 
@@ -625,50 +579,66 @@ export function ProductDetailModal({
                 </div>
 
                 <div className="detail-section">
-                  <h4>Especificaciones de paletizado y estibado</h4>
-                  <div className="detail-stats-grid">
+                  <h4>{usaPaleta ? 'Empaque y paletizado' : 'Empaque por caja'}</h4>
+                  <EmpaqueJerarquia
+                    tipoEmpaque={regla.tipoEmpaque}
+                    unidadesPorEmpaque={regla.unidadesPorEmpaque}
+                    empaquesPorFila={regla.empaquesPorFila}
+                    filasPorPaleta={regla.filasPorPaleta}
+                    usaPaleta={usaPaleta}
+                  />
+                  <div className="detail-stats-grid" style={{ marginTop: '12px' }}>
                     <div className="stat-box">
-                      <span>Unidades por caja</span>
-                      <strong>{rule.unidades_por_caja}</strong>
+                      <span>Unidades por {empSingular}</span>
+                      <strong>{formatoNumero(regla.unidadesPorEmpaque)}</strong>
                     </div>
-                    <div className="stat-box">
-                      <span>Cajas por camada</span>
-                      <strong>{rule.cajas_por_camada}</strong>
-                    </div>
-                    <div className="stat-box">
-                      <span>Camadas por paleta</span>
-                      <strong>{rule.numero_camadas}</strong>
-                    </div>
-                    <div className="stat-box highlight">
-                      <span>Total cajas por paleta</span>
-                      <strong>{cajasPaleta}</strong>
-                    </div>
-                    <div className="stat-box highlight">
-                      <span>Total unidades por paleta</span>
-                      <strong>{unidadesPaleta}</strong>
-                    </div>
-                    <div className="stat-box">
-                      <span>Permite puchos</span>
-                      <strong>{rule.permite_puchos ? 'Sí' : 'No'}</strong>
-                    </div>
+                    {usaPaleta ? (
+                      <>
+                        <div className="stat-box">
+                          <span>{capitalizar(empPlural)} por fila</span>
+                          <strong>{formatoNumero(regla.empaquesPorFila)}</strong>
+                        </div>
+                        <div className="stat-box">
+                          <span>Filas por paleta</span>
+                          <strong>{formatoNumero(regla.filasPorPaleta)}</strong>
+                        </div>
+                        <div className="stat-box highlight">
+                          <span>{capitalizar(empPlural)} por paleta</span>
+                          <strong>{formatoNumero(regla.empaquesPorPaleta)}</strong>
+                        </div>
+                        <div className="stat-box highlight">
+                          <span>Unidades por paleta</span>
+                          <strong>{formatoNumero(regla.unidadesPorPaleta)}</strong>
+                        </div>
+                        <div className="stat-box">
+                          <span>Regla de orden</span>
+                          <strong>Máx. 1 pucho con 1 {empSingular} abierto</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="stat-box">
+                        <span>Regla de orden</span>
+                        <strong>Cajas cerradas + máx. 1 caja abierta</strong>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {(rule.largo_caja_cm || rule.ancho_caja_cm || rule.alto_caja_cm || rule.peso_caja_kg) && (
                   <div className="detail-section">
-                    <h4>Dimensiones físicas y cubicaje</h4>
+                    <h4>Medidas y volumen</h4>
                     <div className="detail-stats-grid">
                       <div className="stat-box">
-                        <span>Medidas caja (cm)</span>
+                        <span>Medidas de cada {empSingular} (cm)</span>
                         <strong>
                           {rule.largo_caja_cm ?? '—'} × {rule.ancho_caja_cm ?? '—'} × {rule.alto_caja_cm ?? '—'}
                         </strong>
                       </div>
                       <div className="stat-box">
-                        <span>Peso por caja</span>
+                        <span>Peso de cada {empSingular}</span>
                         <strong>{rule.peso_caja_kg ? `${rule.peso_caja_kg} kg` : '—'}</strong>
                       </div>
-                      {altoPaletaCm !== null && (
+                      {usaPaleta && altoPaletaCm !== null && (
                         <div className="stat-box highlight">
                           <span>Alto estimado paleta</span>
                           <strong>{altoPaletaCm.toFixed(1)} cm</strong>
@@ -676,19 +646,19 @@ export function ProductDetailModal({
                       )}
                       {volumenCajaM3 !== null && (
                         <div className="stat-box">
-                          <span>Volumen caja</span>
+                          <span>Volumen de cada {empSingular}</span>
                           <strong>{volumenCajaM3.toFixed(4)} m³</strong>
                         </div>
                       )}
-                      {volumenPaletaM3 !== null && (
+                      {usaPaleta && volumenPaletaM3 !== null && (
                         <div className="stat-box highlight">
-                          <span>Volumen paleta</span>
+                          <span>Volumen de la paleta</span>
                           <strong>{volumenPaletaM3.toFixed(3)} m³</strong>
                         </div>
                       )}
-                      {pesoPaletaKg !== null && (
+                      {usaPaleta && pesoPaletaKg !== null && (
                         <div className="stat-box highlight">
-                          <span>Peso estimado paleta</span>
+                          <span>Peso estimado de la paleta</span>
                           <strong>{pesoPaletaKg.toFixed(1)} kg</strong>
                         </div>
                       )}
@@ -696,8 +666,9 @@ export function ProductDetailModal({
                   </div>
                 )}
 
+                {usaPaleta && (
                 <div className="detail-section">
-                  <h4>Patrón de armado de camada</h4>
+                  <h4>Patrón de armado</h4>
                   {rule.notas_armado ? (
                     <p style={{ margin: '0 0 10px', fontSize: '0.92rem', color: 'var(--color-text-primary)' }}>
                       <strong>Instrucciones:</strong> {rule.notas_armado}
@@ -738,10 +709,11 @@ export function ProductDetailModal({
                     </div>
                   ) : (
                     <p className="muted" style={{ fontSize: '0.85rem' }}>
-                      No se ha adjuntado diagrama visual de armado para este producto.
+                      No se ha adjuntado un diagrama de armado para este producto.
                     </p>
                   )}
                 </div>
+                )}
               </>
             ) : null}
           </>

@@ -65,7 +65,7 @@ export function MovementHistorySubView({
               fontFamily: 'var(--font-display)',
               fontSize: '19px',
               fontWeight: 600,
-              color: 'var(--color-brand-deep)',
+              color: 'var(--color-brand-deep-text)',
               margin: 0
             }}
           >

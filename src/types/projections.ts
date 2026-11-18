@@ -69,6 +69,8 @@ export interface CalculatedProjectionRow {
   fecha_quiebre: string
   estado_critico: CriticalStatus
   valores_personalizados?: Record<string, number>
+  promedio_manual?: number | null
+  stock_min_redondeado_manual?: number | null
 }
 
 export interface TemplateParamsForm {

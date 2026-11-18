@@ -47,6 +47,40 @@ interface ProjectionSummaryApprovalSubViewProps {
   readOnly?: boolean
 }
 
+type ReglaProducto = { id_producto: number; sku: string; unidades_por_caja: number; cajas_por_paleta: number }
+type ReglasCatalogo = { byId: Map<number, ReglaProducto>; byName: Map<string, ReglaProducto> }
+
+/** Regla de empaque del producto: por id y, si la fila no trae id, por nombre. */
+function buscarRegla(reglas: ReglasCatalogo, idProducto: number | null | undefined, nombre: string): ReglaProducto | null {
+  return (idProducto ? reglas.byId.get(idProducto) : undefined) ?? reglas.byName.get((nombre || '').trim().toUpperCase()) ?? null
+}
+
+/** Recalcula cajas, paletas y pucho (proyectados y aprobados) con la regla dada. */
+function derivarEmpaque(row: ApprovedItemRow, unidCaja: number, cajasPal: number): ApprovedItemRow {
+  const uc = Math.max(1, unidCaja)
+  const cp = Math.max(1, cajasPal)
+  const cajasProy = Math.ceil(row.compra_proyectada / uc)
+  const cajasAprob = Math.ceil(row.cantidad_aprobada / uc)
+  const paletasAprob = Math.floor(cajasAprob / cp)
+  const puchoAprob = cajasAprob % cp
+  return {
+    ...row,
+    unidades_por_caja: uc,
+    cajas_por_paleta: cp,
+    cajas_proyectadas: cajasProy,
+    paletas_completas_proyectadas: Math.floor(cajasProy / cp),
+    pucho_cajas_proyectadas: cajasProy % cp,
+    cajas_aprobadas: cajasAprob,
+    paletas_completas_aprobadas: paletasAprob,
+    pucho_cajas_aprobadas: puchoAprob,
+    pucho_unidades_aprobadas: Math.max(0, row.cantidad_aprobada - paletasAprob * cp * uc),
+    total_bultos_aprobados: paletasAprob + (puchoAprob > 0 ? 1 : 0),
+    cajas_calculadas_temp: cajasAprob,
+    paletas_calculadas_temp: paletasAprob,
+    puchos_calculados_temp: puchoAprob
+  }
+}
+
 export function ProjectionSummaryApprovalSubView({
   order,
   calculatedRows,
@@ -56,7 +90,7 @@ export function ProjectionSummaryApprovalSubView({
   readOnly = false
 }: ProjectionSummaryApprovalSubViewProps) {
   const [rows, setRows] = useState<ApprovedItemRow[]>([])
-  const [packingRulesMap, setPackingRulesMap] = useState<Map<number, { unidades_por_caja: number; cajas_por_paleta: number }>>(new Map())
+  const [reglas, setReglas] = useState<ReglasCatalogo>({ byId: new Map(), byName: new Map() })
   const [searchFilter, setSearchFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'APROBADOS' | 'PENDIENTES'>('ALL')
   const [isSavingAvance, setIsSavingAvance] = useState(false)
@@ -67,11 +101,22 @@ export function ProjectionSummaryApprovalSubView({
   // Cargar reglas de empaque reales del catálogo
   useEffect(() => {
     let mounted = true
-    packingListService.getProductsPackingRules().then((map) => {
-      if (mounted) {
-        setPackingRulesMap(map)
-      }
-    })
+    packingListService
+      .getProductRules()
+      .then(({ byId, byName }) => {
+        if (!mounted) return
+        const convertir = (r: { id_producto: number; sku: string; modo: string; unidades_por_caja: number | null; cajas_por_paleta: number | null }): ReglaProducto => ({
+          id_producto: r.id_producto,
+          sku: r.sku,
+          unidades_por_caja: r.unidades_por_caja || 1,
+          cajas_por_paleta: r.modo === 'PALETIZADO' ? r.cajas_por_paleta || 1 : 1
+        })
+        setReglas({
+          byId: new Map([...byId].map(([k, v]) => [k, convertir(v)])),
+          byName: new Map([...byName].map(([k, v]) => [k, convertir(v)]))
+        })
+      })
+      .catch((err) => console.warn('No se pudieron cargar las reglas de empaque:', err))
     return () => {
       mounted = false
     }
@@ -92,7 +137,7 @@ export function ProjectionSummaryApprovalSubView({
                 : 'APROBADO_RECALCULO'
               : 'PENDIENTE'
           }
-          return {
+          const base: ApprovedItemRow = {
             ...r,
             estado_decision: decState,
             cantidad_editable: r.cantidad_editable !== undefined ? r.cantidad_editable : String(r.cantidad_aprobada),
@@ -100,6 +145,15 @@ export function ProjectionSummaryApprovalSubView({
             paletas_calculadas_temp: r.paletas_calculadas_temp !== undefined ? r.paletas_calculadas_temp : r.paletas_completas_aprobadas,
             puchos_calculados_temp: r.puchos_calculados_temp !== undefined ? r.puchos_calculados_temp : r.pucho_cajas_aprobadas
           }
+          // Aprobaciones guardadas sin id de producto quedaron con regla 1:1: se recalculan con la regla real.
+          // Las cantidades y decisiones no cambian; solo cajas, paletas y pucho.
+          const regla = buscarRegla(reglas, r.id_producto, r.nombre_producto)
+          if (!regla) return base
+          return derivarEmpaque(
+            { ...base, id_producto: r.id_producto ?? regla.id_producto, sku: regla.sku },
+            regla.unidades_por_caja,
+            regla.cajas_por_paleta
+          )
         })
       )
       return
@@ -107,10 +161,10 @@ export function ProjectionSummaryApprovalSubView({
 
     // Si no, construir a partir de calculatedRows
     const initialRows: ApprovedItemRow[] = calculatedRows.map((calc) => {
-      const prodId = calc.id_producto || 0
-      const rule = packingRulesMap.get(prodId) || { unidades_por_caja: 1, cajas_por_paleta: 1 }
-      const unidCaja = Math.max(1, rule.unidades_por_caja)
-      const cajasPal = Math.max(1, rule.cajas_por_paleta)
+      const regla = buscarRegla(reglas, calc.id_producto, calc.nombre_producto)
+      const prodId = calc.id_producto || regla?.id_producto || null
+      const unidCaja = Math.max(1, regla?.unidades_por_caja ?? 1)
+      const cajasPal = Math.max(1, regla?.cajas_por_paleta ?? 1)
 
       const compraProy = calc.compra_sugerida
       const cajasProy = Math.ceil(compraProy / unidCaja)
@@ -119,8 +173,8 @@ export function ProjectionSummaryApprovalSubView({
 
       return {
         id_item: calc.id_item,
-        id_producto: calc.id_producto,
-        sku: `SKU-${calc.id_producto ? String(calc.id_producto).padStart(5, '0') : '00000'}`,
+        id_producto: prodId,
+        sku: regla?.sku ?? '—',
         nombre_producto: calc.nombre_producto,
         promedio_consumo: calc.promedio_final,
         stock_real: calc.stock_real,
@@ -148,7 +202,7 @@ export function ProjectionSummaryApprovalSubView({
     })
 
     setRows(initialRows)
-  }, [calculatedRows, packingRulesMap, order, isOrderEmitted])
+  }, [calculatedRows, reglas, order, isOrderEmitted])
 
   // Persistir estado de aprobación en snapshot y Supabase
   const persistApprovalState = async (updatedRows: ApprovedItemRow[]) => {
@@ -648,7 +702,7 @@ export function ProjectionSummaryApprovalSubView({
                   margin: 0,
                   fontSize: '22px',
                   fontWeight: 600,
-                  color: 'var(--color-brand-deep)',
+                  color: 'var(--color-brand-deep-text)',
                   fontFamily: 'Barlow Semi Condensed, sans-serif'
                 }}
               >
@@ -686,7 +740,7 @@ export function ProjectionSummaryApprovalSubView({
             }}
           >
             <span>
-              Orden: <strong style={{ color: 'var(--color-brand-deep)' }}>{order.numero_orden}</strong>
+              Orden: <strong style={{ color: 'var(--color-brand-deep-text)' }}>{order.numero_orden}</strong>
             </span>
             <span>•</span>
             <span>
@@ -787,7 +841,7 @@ export function ProjectionSummaryApprovalSubView({
           }}
         >
           <div>
-            <strong style={{ fontSize: '14px', color: 'var(--color-brand-deep)' }}>
+            <strong style={{ fontSize: '14px', color: 'var(--color-brand-deep-text)' }}>
               Registro oficial congelado para auditoría
             </strong>
             <p className="muted" style={{ margin: '2px 0 0 0', fontSize: '13px' }}>
@@ -857,8 +911,8 @@ export function ProjectionSummaryApprovalSubView({
         </div>
 
         <div className="indicator-card">
-          <span className="indicator-label">Bultos físicos en muelle</span>
-          <span className="indicator-value" style={{ color: 'var(--color-brand-deep)' }}>
+          <span className="indicator-label">Bultos físicos en Operaciones</span>
+          <span className="indicator-value" style={{ color: 'var(--color-brand-deep-text)' }}>
             {metrics.totalBultos}
           </span>
           <span className="indicator-context">
@@ -943,7 +997,7 @@ export function ProjectionSummaryApprovalSubView({
         <table>
           <thead>
             <tr style={{ background: 'var(--color-canvas)', borderBottom: '2px solid var(--color-border)' }}>
-              <th colSpan={3} style={{ textAlign: 'left', padding: '10px 14px', fontSize: '13px', color: 'var(--color-brand-deep)' }}>
+              <th colSpan={3} style={{ textAlign: 'left', padding: '10px 14px', fontSize: '13px', color: 'var(--color-brand-deep-text)' }}>
                 Identificación del producto
               </th>
               <th colSpan={3} style={{ textAlign: 'center', background: '#F8FAFC', borderLeft: '1px solid var(--color-border)', borderRight: '1px solid var(--color-border)', fontSize: '13px' }}>
@@ -1017,7 +1071,7 @@ export function ProjectionSummaryApprovalSubView({
                       {idx + 1}
                     </td>
                     <td>
-                      <code style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand-deep)' }}>
+                      <code style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
                         {row.sku}
                       </code>
                     </td>
@@ -1212,7 +1266,7 @@ export function ProjectionSummaryApprovalSubView({
                           </button>
                         </div>
                       ) : isApproved ? (
-                        <strong style={{ color: 'var(--color-brand-deep)', fontSize: '13px' }}>
+                        <strong style={{ color: 'var(--color-brand-deep-text)', fontSize: '13px' }}>
                           {row.cantidad_aprobada.toLocaleString('es-PE')} und
                         </strong>
                       ) : (
@@ -1339,12 +1393,12 @@ export function ProjectionSummaryApprovalSubView({
         }}
       >
         <div>
-          <strong style={{ fontSize: '14px', color: 'var(--color-brand-deep)' }}>
+          <strong style={{ fontSize: '14px', color: 'var(--color-brand-deep-text)' }}>
             Efecto de la confirmación:
           </strong>
           <p className="muted" style={{ margin: '4px 0 0 0', fontSize: '13px', maxWidth: '650px' }}>
             {allApproved
-              ? 'Todos los productos han sido confirmados. Al pulsar el botón se guardarán las cantidades autorizadas en la orden de importación y se abrirá directamente el Packing List oficial para muelle.'
+              ? 'Todos los productos han sido confirmados. Al pulsar el botón se guardarán las cantidades autorizadas en la orden de importación y se abrirá directamente el Packing List oficial para Operaciones.'
               : `Aún no puede continuar: faltan ${metrics.pendientesCount} productos por revisar y confirmar.`}
           </p>
         </div>

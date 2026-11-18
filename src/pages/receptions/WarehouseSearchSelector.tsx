@@ -87,7 +87,7 @@ export function WarehouseSearchSelector({
             >
               {selectedWarehouse.prefijo_rfid || 'IMP'}
             </span>
-            <span style={{ fontWeight: 600, color: 'var(--color-brand-deep)' }}>
+            <span style={{ fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
               {selectedWarehouse.nombre}
             </span>
           </>

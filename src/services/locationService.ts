@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase'
 import type { LocationType, PalletRecord, RackCell, WarehouseLane } from '../types/locations'
-import { getReservedTagsFromAllOrders } from './packingListService'
+import { packingListService } from './packingListService'
 
 // Clave para almacenamiento local de contingencia/demo
 const STORAGE_PREFIX = 'shalom_wms_racks_'
@@ -70,7 +70,8 @@ export const locationService = {
         .eq('id_almacen', warehouseId)
         .order('codigo_carril')
 
-      if (!lanesErr && lanesData && lanesData.length > 0) {
+      // Si Supabase responde, es la única fuente de verdad (aunque no haya carriles)
+      if (!lanesErr && lanesData) {
         return lanesData.map((l: any) => ({
           id_carril: l.id_carril,
           id_almacen: l.id_almacen,
@@ -119,34 +120,14 @@ export const locationService = {
         .eq('id_almacen', warehouseId)
         .order('codigo_ubicacion')
 
-      if (!cellsErr && cellsData && cellsData.length > 0) {
-        const localPallets = this.getLocalPallets(warehouseId)
+      // Si Supabase responde, es la única fuente de verdad (no se mezclan datos guardados en el navegador)
+      if (!cellsErr && cellsData) {
         const mappedCells: RackCell[] = cellsData.map((c: any) => {
           let rawTag: any = null
           if (Array.isArray(c.etiqueta_rfid)) {
-            rawTag = c.etiqueta_rfid.find((t: any) => t && t.id_etiqueta && t.estado !== 'VACIA') || null
-          } else if (c.etiqueta_rfid && c.etiqueta_rfid.id_etiqueta && c.etiqueta_rfid.estado !== 'VACIA') {
+            rawTag = c.etiqueta_rfid.find((t: any) => t && t.id_etiqueta && t.estado === 'ACTIVA') || null
+          } else if (c.etiqueta_rfid && c.etiqueta_rfid.id_etiqueta && c.etiqueta_rfid.estado === 'ACTIVA') {
             rawTag = c.etiqueta_rfid
-          }
-
-          // Si en Supabase no hay etiqueta en esta celda, verificar si hay alguna asignada en local
-          if (!rawTag) {
-            const matchedLocal = localPallets.find(
-              (p) => p.id_celda && Number(p.id_celda) === Number(c.id_celda) && p.estado !== 'VACIA'
-            )
-            if (matchedLocal) {
-              rawTag = {
-                id_etiqueta: matchedLocal.id_etiqueta,
-                uid_tag: matchedLocal.uid_tag,
-                codigo_barras: matchedLocal.codigo_barras,
-                id_producto: matchedLocal.id_producto,
-                producto: matchedLocal.producto,
-                tipo_paleta: matchedLocal.tipo_paleta,
-                cantidad_paquetes: matchedLocal.cantidad_paquetes,
-                cantidad_actual: matchedLocal.cantidad_actual,
-                fecha_enrolamiento: new Date().toISOString()
-              }
-            }
           }
 
           const hasOccupant = Boolean(rawTag && rawTag.id_etiqueta)
@@ -218,6 +199,7 @@ export const locationService = {
           tipo_paleta,
           cantidad_paquetes,
           cantidad_actual,
+          unidades_sueltas,
           estado,
           notas,
           producto (
@@ -257,6 +239,7 @@ export const locationService = {
             tipo_paleta: p.tipo_paleta,
             cantidad_paquetes: p.cantidad_paquetes,
             cantidad_actual: p.cantidad_actual,
+            unidades_sueltas: Number(p.unidades_sueltas) || 0,
             estado: p.estado,
             notas: p.notas,
             producto: prodObj
@@ -270,49 +253,9 @@ export const locationService = {
           }
         })
 
-        const localList = this.getLocalPallets(warehouseId)
-        if (remoteList.length === 0 && localList.length > 0) {
-          return localList
-        }
-
-        // Fusionar paletas remotas con paletas locales:
-        // Si una paleta local tiene ubicación activa en Zona Campo o en celda, preservarla
-        const remoteUids = new Set(remoteList.map((p) => p.uid_tag))
-        const combined: PalletRecord[] = remoteList.map((rp: PalletRecord) => {
-          const lp = localList.find(
-            (item) => item.uid_tag === rp.uid_tag || String(item.id_etiqueta) === String(rp.id_etiqueta)
-          )
-          if (lp) {
-            // Si localmente está en Zona Campo, asegurar que mantenga su asignación
-            if (lp.tipo_ubicacion === 'CAMPO' || lp.codigo_ubicacion?.includes('CAMPO') || Number(lp.id_celda) >= 9999) {
-              return {
-                ...rp,
-                id_celda: lp.id_celda || 9999 + warehouseId,
-                codigo_ubicacion: lp.codigo_ubicacion || `ALM${warehouseId}-CAMPO`,
-                tipo_ubicacion: 'CAMPO'
-              }
-            }
-            // Si localmente tiene celda asignada y en remoto está null
-            if (lp.id_celda && !rp.id_celda) {
-              return {
-                ...rp,
-                id_celda: lp.id_celda,
-                codigo_ubicacion: lp.codigo_ubicacion,
-                tipo_ubicacion: lp.tipo_ubicacion
-              }
-            }
-          }
-          return rp
-        })
-
-        for (const lp of localList) {
-          if (!remoteUids.has(lp.uid_tag) && lp.estado === 'ACTIVA') {
-            combined.push(lp)
-          }
-        }
-
-        localStorage.setItem(`${STORAGE_PREFIX}pallets_${warehouseId}`, JSON.stringify(combined))
-        return combined
+        // Supabase es la única fuente de verdad: no se mezclan paletas guardadas en el navegador
+        // (antes reaparecían paletas "fantasma" ya eliminadas de la base).
+        return remoteList
       }
     } catch {
       // Fallback
@@ -1024,7 +967,7 @@ export const locationService = {
     const transferBoxes = Number(origTag.cantidad_paquetes) || Math.max(1, Math.floor(transferUnits / uCaja))
 
     // D. Calcular el menor código RFID libre en destino (rellenando huecos de menor a mayor y excluyendo reservas de Packing List)
-    const occupiedNumbers = new Set<number>(getReservedTagsFromAllOrders(prefix))
+    const occupiedNumbers = new Set<number>(await packingListService.getReservedTagNumbers(prefix).catch(() => new Set<number>()))
     const vaciaTagByUid = new Map<string, any>()
 
     try {
@@ -1611,7 +1554,7 @@ export const locationService = {
     prefix = prefix || `ALM${warehouseId}`
 
     // 1. Obtener todos los códigos reservados en órdenes de importación activas (en tránsito o borrador)
-    const reservedNumbers = getReservedTagsFromAllOrders(prefix)
+    const reservedNumbers = await packingListService.getReservedTagNumbers(prefix).catch(() => new Set<number>())
 
     // 2. Intentar primero invocar la RPC oficial en Supabase (sugerir_uid_rfid)
     try {

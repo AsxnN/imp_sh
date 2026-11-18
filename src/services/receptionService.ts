@@ -172,12 +172,12 @@ export const receptionService = {
         `)
         .order('fecha_emision', { ascending: false })
 
-      if (filterStatus === 'PENDING') {
-        query = query.in('estado', ['TRANSITO', 'BORRADOR'])
-      }
+      // Recepciones solo trabaja órdenes aprobadas: en tránsito (por recibir) o ya recibidas
+      query = filterStatus === 'PENDING' ? query.eq('estado', 'TRANSITO') : query.in('estado', ['TRANSITO', 'RECIBIDA'])
 
       const { data, error } = await query
-      if (!error && data && data.length > 0) {
+      if (error) throw error
+      if (data) {
         return data.map((ord: any) => ({
           id_orden: ord.id_orden,
           numero_orden: ord.numero_orden,
@@ -235,100 +235,7 @@ export const receptionService = {
       console.warn('Error querying orden_importacion from Supabase:', err)
     }
 
-    // Fallback con órdenes sincronizadas desde el Módulo 06 / localStorage
-    try {
-      const cached = localStorage.getItem('shalom_projection_orders_v1')
-      if (cached) {
-        const parsed = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed
-            .filter((o: any) => filterStatus !== 'PENDING' || o.estado === 'TRANSITO' || o.estado === 'BORRADOR')
-            .map((ord: any) => ({
-              id_orden: ord.id_orden,
-              numero_orden: ord.numero_orden,
-              id_proveedor: ord.id_proveedor || null,
-              estado: ord.estado,
-              fecha_emision: ord.fecha_emision || new Date().toISOString().split('T')[0],
-              tipo_contenedor: ord.tipo_contenedor || '40FT',
-              volumen_ocupado_m3: ord.volumen_ocupado_m3 || null,
-              snapshot_proyeccion: ord.snapshot_proyeccion || null,
-              proveedor: ord.proveedor
-                ? {
-                    id_proveedor: ord.proveedor.id_proveedor,
-                    razon_social: ord.proveedor.razon_social,
-                    nombre: ord.proveedor.razon_social
-                  }
-                : null,
-              detalles: (ord.detalles || []).map((det: any, dIdx: number) => ({
-                id_detalle: det.id_detalle || dIdx + 1,
-                id_orden: ord.id_orden,
-                id_producto: det.id_producto || dIdx + 1,
-                cantidad_pedida: det.cantidad_pedida,
-                subtotal_peso_kg: det.subtotal_peso_kg || 0,
-                subtotal_volumen_m3: det.subtotal_volumen_m3 || 0,
-                producto: det.producto
-                  ? {
-                      id_producto: det.producto.id_producto || det.id_producto || dIdx + 1,
-                      sku: det.producto.sku || `SKU-${dIdx + 1}`,
-                      nombre: det.producto.nombre || `Producto ${dIdx + 1}`,
-                      regla_empaque: det.desglose_empaque || null
-                    }
-                  : null
-              }))
-            }))
-        }
-      }
-    } catch {}
-
-    // Fallback de contingencia con órdenes base oficiales
-    const defaultFallbackOrders: ImportOrder[] = [
-      {
-        id_orden: 1,
-        numero_orden: 'IMP-2026-001',
-        id_proveedor: 1,
-        estado: 'TRANSITO',
-        fecha_emision: '2026-10-15',
-        tipo_contenedor: '40FT',
-        volumen_ocupado_m3: 58.5,
-        proveedor: { id_proveedor: 1, razon_social: 'Zhejiang Shalom Trading Co., Ltd.' },
-        detalles: [
-          {
-            id_detalle: 1,
-            id_orden: 1,
-            id_producto: 1,
-            cantidad_pedida: 5000,
-            subtotal_peso_kg: 12500,
-            subtotal_volumen_m3: 45.0,
-            producto: { id_producto: 1, sku: 'PROD-A01', nombre: 'BOLSA SEGURIDAD GRANDE' }
-          }
-        ]
-      },
-      {
-        id_orden: 2,
-        numero_orden: 'IMP-2026-002',
-        id_proveedor: 1,
-        estado: 'TRANSITO',
-        fecha_emision: '2026-10-20',
-        tipo_contenedor: '20FT',
-        volumen_ocupado_m3: 31.0,
-        proveedor: { id_proveedor: 1, razon_social: 'Shenzhen Thermal Paper Tech' },
-        detalles: [
-          {
-            id_detalle: 2,
-            id_orden: 2,
-            id_producto: 2,
-            cantidad_pedida: 2400,
-            subtotal_peso_kg: 7200,
-            subtotal_volumen_m3: 22.0,
-            producto: { id_producto: 2, sku: 'ROLLO-01', nombre: 'ROLLO TERMICO 80X80' }
-          }
-        ]
-      }
-    ]
-
-    return filterStatus === 'PENDING'
-      ? defaultFallbackOrders.filter((o) => o.estado === 'TRANSITO' || o.estado === 'BORRADOR')
-      : defaultFallbackOrders
+    return []
   },
 
   // 5. Crear una nueva orden de importación con su detalle

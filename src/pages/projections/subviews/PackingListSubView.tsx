@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { OrderPackingPlan, PuchoConsolidationItem } from '../../../services/packingListService'
+import type {
+  OrderPackingPlan,
+  PackingMode,
+  PalletTagItem,
+  ProductPackingSummary,
+  PuchoConsolidationItem
+} from '../../../services/packingListService'
 import { packingListService } from '../../../services/packingListService'
 import { PalletStickerModal, type PalletStickerData } from '../../../components/PalletStickerModal'
 
@@ -9,149 +15,124 @@ interface PackingListSubViewProps {
   onOpenReceptions?: () => void
 }
 
-export function PackingListSubView({
-  plan,
-  onBack,
-  onOpenReceptions
-}: PackingListSubViewProps) {
-  const [selectedTab, setSelectedTab] = useState<'both' | 'summary' | 'pallets'>('both')
-  const [copiedTag, setCopiedTag] = useState<string | null>(null)
-  const [copiedAll, setCopiedAll] = useState(false)
-  const [palletSearch, setPalletSearch] = useState('')
-  const [palletTypeFilter, setPalletTypeFilter] = useState<'TODOS' | 'COMPLETO' | 'PUCHO' | 'RESERVA_EXCEDENTE'>('TODOS')
-  const [verifiedTags, setVerifiedTags] = useState<Set<string>>(new Set())
-  const [selectedSticker, setSelectedSticker] = useState<PalletStickerData | null>(null)
+type Pestana = 'productos' | 'codigos' | 'contingencia'
+type FiltroTipo = 'TODOS' | 'COMPLETO' | 'PUCHO'
 
-  // Consolidaciones de puchos detectadas contra el inventario físico en almacén
-  const [puchoConsolidations, setPuchoConsolidations] = useState<PuchoConsolidationItem[]>([])
+const MODO_LABEL: Record<PackingMode, string> = {
+  PALETIZADO: 'Paletizado',
+  PICKING_CAJA: 'Por caja',
+  SERIALIZADO: 'Serializado'
+}
+
+const CONTENEDOR_LABEL: Record<string, string> = {
+  '40FT': '40 pies',
+  '20FT': '20 pies',
+  LCL: 'Carga consolidada'
+}
+
+const EMPAQUE_PLURAL: Record<string, [string, string]> = {
+  CAJA: ['caja', 'cajas'],
+  PAQUETE: ['paquete', 'paquetes'],
+  BOLSA: ['bolsa', 'bolsas'],
+  ROLLO: ['rollo', 'rollos'],
+  FARDO: ['fardo', 'fardos']
+}
+
+const fmt = (n: number) => n.toLocaleString('es-PE')
+const modoDe = (p: ProductPackingSummary): PackingMode => p.modo ?? 'PALETIZADO'
+const empaque = (p: ProductPackingSummary, n: number) => {
+  const [s, pl] = EMPAQUE_PLURAL[(p.tipo_empaque || 'CAJA').toUpperCase()] ?? EMPAQUE_PLURAL.CAJA
+  return n === 1 ? s : pl
+}
+
+/** Agrupa códigos consecutivos: IMP00001, IMP00002, IMP00003 → "IMP00001 – IMP00003" */
+function rangosDeCodigos(tags: string[]): string[] {
+  const out: string[] = []
+  let ini = 0
+  const num = (t: string) => Number(t.replace(/\D/g, ''))
+  const pre = (t: string) => t.replace(/\d+$/, '')
+  for (let i = 1; i <= tags.length; i++) {
+    const corte =
+      i === tags.length || pre(tags[i]) !== pre(tags[i - 1]) || num(tags[i]) !== num(tags[i - 1]) + 1
+    if (corte) {
+      out.push(i - 1 === ini ? tags[ini] : `${tags[ini]} – ${tags[i - 1]}`)
+      ini = i
+    }
+  }
+  return out
+}
+
+function desglose(p: ProductPackingSummary): string {
+  const modo = modoDe(p)
+  if (modo === 'SERIALIZADO') return `${fmt(p.cantidad_pedida)} ${p.cantidad_pedida === 1 ? 'equipo' : 'equipos'} con número de serie`
+  if (p.sin_regla) return 'Falta la regla de empaque'
+  if (modo === 'PICKING_CAJA') {
+    const completas = p.unidades_pucho > 0 ? p.cajas_totales - 1 : p.cajas_totales
+    return p.unidades_pucho > 0
+      ? `${fmt(completas)} ${empaque(p, completas)} cerradas + 1 con ${fmt(p.unidades_pucho)} u`
+      : `${fmt(p.cajas_totales)} ${empaque(p, p.cajas_totales)} cerradas`
+  }
+  const partes: string[] = []
+  if (p.paletas_completas > 0) partes.push(`${p.paletas_completas} ${p.paletas_completas === 1 ? 'paleta completa' : 'paletas completas'}`)
+  if (p.cajas_pucho > 0) partes.push(`pucho de ${p.cajas_pucho} ${empaque(p, p.cajas_pucho)}`)
+  return partes.join(' + ') || '—'
+}
+
+export function PackingListSubView({ plan, onBack, onOpenReceptions }: PackingListSubViewProps) {
+  const [pestana, setPestana] = useState<Pestana>('productos')
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState<FiltroTipo>('TODOS')
+  const [copiado, setCopiado] = useState<string | null>(null)
+  const [sticker, setSticker] = useState<PalletStickerData | null>(null)
+  const [consolidaciones, setConsolidaciones] = useState<PuchoConsolidationItem[]>([])
 
   useEffect(() => {
-    let isMounted = true
-    const checkConsolidations = async () => {
-      try {
-        const items = await packingListService.detectWarehousePuchosForPlan(
-          plan.productos,
-          plan.prefijo_almacen
-        )
-        if (isMounted) setPuchoConsolidations(items)
-      } catch (err) {
-        console.warn('Error al verificar consolidaciones de pucho:', err)
-      }
-    }
-    checkConsolidations()
+    let vivo = true
+    packingListService
+      .detectWarehousePuchosForPlan(plan.productos, plan.prefijo_almacen)
+      .then((r) => vivo && setConsolidaciones(r))
+      .catch(() => vivo && setConsolidaciones([]))
     return () => {
-      isMounted = false
+      vivo = false
     }
   }, [plan])
 
-  // Mapeo rápido de consolidaciones por id_producto
-  const consolidationByProdId = useMemo(() => {
-    return new Map(puchoConsolidations.map((c) => [c.id_producto, c]))
-  }, [puchoConsolidations])
+  const consolidacionPorProducto = useMemo(
+    () => new Map(consolidaciones.map((c) => [c.id_producto, c])),
+    [consolidaciones]
+  )
 
-  // Lista detallada de todas las paletas individuales
-  const allPallets = useMemo(() => {
-    const list: Array<{
-      correlativo: number
-      uid_tag: string
-      sku: string
-      nombre: string
-      tipo: 'COMPLETO' | 'PUCHO' | 'RESERVA_EXCEDENTE'
-      cajas: number
-      unidades: number
-      unidadesPorPaleta: number
-      notas?: string
-    }> = []
+  const sinRegla = useMemo(() => plan.productos.filter((p) => p.sin_regla), [plan])
+  const totalSeries = plan.total_series ?? plan.productos.filter((p) => modoDe(p) === 'SERIALIZADO').reduce((a, p) => a + p.cantidad_pedida, 0)
+  const totalCajasSueltas =
+    plan.total_cajas_sueltas ?? plan.productos.filter((p) => modoDe(p) === 'PICKING_CAJA').reduce((a, p) => a + p.cajas_totales, 0)
+  const totalCodigos = plan.etiquetas_bultos.length + plan.etiquetas_reserva.length
 
-    let idx = 1
-    for (const prod of plan.productos) {
-      const consol = consolidationByProdId.get(prod.id_producto)
-      for (const pal of prod.paletas) {
-        const notasItem =
-          pal.tipo === 'PUCHO' && consol
-            ? `Consolidar con ${consol.tag_existente} (${consol.cajas_existentes} cajas en ${consol.ubicacion_existente}) · ${consol.titulo_caso}`
-            : pal.notas
-
-        list.push({
-          correlativo: idx++,
-          uid_tag: pal.uid_tag,
-          sku: prod.sku,
-          nombre: prod.nombre,
-          tipo: pal.tipo,
-          cajas: pal.cajas,
-          unidades: pal.unidades,
-          unidadesPorPaleta: prod.unidades_por_paleta,
-          notas: notasItem
-        })
-      }
-    }
-
-    for (const res of plan.etiquetas_reserva) {
-      list.push({
-        correlativo: idx++,
-        uid_tag: res.uid_tag,
-        sku: 'RESERVA',
-        nombre: 'Etiqueta de contingencia para excedentes en muelle',
-        tipo: 'RESERVA_EXCEDENTE',
-        cajas: 0,
-        unidades: 0,
-        unidadesPorPaleta: 0,
-        notas: 'Reserva para bultos imprevistos'
-      })
-    }
-
-    return list
-  }, [plan, consolidationByProdId])
-
-  // Filtrado de paletas individuales
-  const filteredPallets = useMemo(() => {
-    return allPallets.filter((p) => {
-      const matchSearch =
-        !palletSearch.trim() ||
-        p.uid_tag.toLowerCase().includes(palletSearch.toLowerCase().trim()) ||
-        p.nombre.toLowerCase().includes(palletSearch.toLowerCase().trim()) ||
-        p.sku.toLowerCase().includes(palletSearch.toLowerCase().trim())
-
-      const matchType =
-        palletTypeFilter === 'TODOS' || p.tipo === palletTypeFilter
-
-      return matchSearch && matchType
+  const codigosFiltrados = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return plan.etiquetas_bultos.filter((t) => {
+      const okTipo = filtroTipo === 'TODOS' || t.tipo === filtroTipo
+      const okTexto = !q || t.uid_tag.toLowerCase().includes(q) || t.nombre.toLowerCase().includes(q) || t.sku.toLowerCase().includes(q)
+      return okTipo && okTexto
     })
-  }, [allPallets, palletSearch, palletTypeFilter])
+  }, [plan, busqueda, filtroTipo])
 
-  // Copia de un código individual
-  const handleCopyTag = (tag: string) => {
-    navigator.clipboard.writeText(tag)
-    setCopiedTag(tag)
-    setTimeout(() => setCopiedTag(null), 2000)
+  const copiar = (texto: string, clave: string) => {
+    void navigator.clipboard.writeText(texto)
+    setCopiado(clave)
+    window.setTimeout(() => setCopiado(null), 2000)
   }
 
-  // Copia masiva de todos los códigos de paletas
-  const handleCopyAllTags = () => {
-    const allCodes = allPallets.map((p) => p.uid_tag).join(', ')
-    navigator.clipboard.writeText(allCodes)
-    setCopiedAll(true)
-    setTimeout(() => setCopiedAll(false), 2500)
-  }
-
-  // Abrir vista previa e impresión de sticker térmico
-  const handleOpenSticker = (item: (typeof allPallets)[0]) => {
-    const whLabel =
-      plan.prefijo_almacen === 'IMP'
-        ? 'ALMACÉN IMPORTACIONES'
-        : plan.prefijo_almacen === 'STO'
-        ? 'ALMACÉN STORE'
-        : `ALMACÉN [${plan.prefijo_almacen}]`
-
-    setSelectedSticker({
-      almacenNombre: whLabel,
+  const abrirSticker = (t: PalletTagItem) => {
+    setSticker({
+      almacenNombre: `Almacén ${plan.prefijo_almacen}`,
       empresa: 'SHALOM',
-      tagRfid: item.uid_tag,
+      tagRfid: t.uid_tag,
       ordenNumero: plan.numero_orden,
-      sku: item.sku,
-      productoNombre: item.nombre,
-      cajas: item.cajas,
-      unidades: item.unidades,
+      sku: t.sku,
+      productoNombre: t.nombre,
+      cajas: t.cajas,
+      unidades: t.unidades,
       cajasPorCamada: null,
       camadas: null,
       pesoTotalKg: null,
@@ -160,959 +141,337 @@ export function PackingListSubView({
     })
   }
 
-  // Marcar / desmarcar verificación de paleta
-  const handleToggleVerified = (uid_tag: string) => {
-    setVerifiedTags((prev) => {
-      const next = new Set(prev)
-      if (next.has(uid_tag)) {
-        next.delete(uid_tag)
-      } else {
-        next.add(uid_tag)
-      }
-      return next
-    })
-  }
-
-  const handleToggleSelectAllVerified = () => {
-    if (verifiedTags.size === filteredPallets.length && filteredPallets.length > 0) {
-      setVerifiedTags(new Set())
-    } else {
-      setVerifiedTags(new Set(filteredPallets.map((p) => p.uid_tag)))
-    }
-  }
-
-  // Totales acumulados para la fila de resumen
-  const totals = useMemo(() => {
-    return plan.productos.reduce(
-      (acc, p) => ({
-        cantidadPedida: acc.cantidadPedida + p.cantidad_pedida,
-        cajasTotales: acc.cajasTotales + p.cajas_totales,
-        paletasCompletas: acc.paletasCompletas + p.paletas_completas,
-        cajasPucho: acc.cajasPucho + p.cajas_pucho,
-        unidadesPucho: acc.unidadesPucho + p.unidades_pucho,
-        totalBultos: acc.totalBultos + p.total_bultos
-      }),
-      {
-        cantidadPedida: 0,
-        cajasTotales: 0,
-        paletasCompletas: 0,
-        cajasPucho: 0,
-        unidadesPucho: 0,
-        totalBultos: 0
-      }
-    )
-  }, [plan])
+  const contenedor = CONTENEDOR_LABEL[plan.contenedor] ?? plan.contenedor
+  const atenciones = sinRegla.length + consolidaciones.length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* 1. Encabezado Maestro de Vista Completa */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: '16px',
-          borderBottom: '1px solid var(--color-border)',
-          paddingBottom: '16px'
-        }}
-      >
+      {/* Encabezado */}
+      <header className="page-heading" style={{ flexWrap: 'wrap' }}>
         <div>
-          <button
-            type="button"
-            className="button secondary button-sm no-print"
-            onClick={onBack}
-            style={{ marginBottom: '10px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            ← Volver a la proyección
+          <button type="button" className="link-back no-print" onClick={onBack} style={{ padding: 0, marginBottom: '8px' }}>
+            ← Volver a la orden
           </button>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <span
-              style={{
-                fontSize: '12px',
-                fontWeight: 600,
-                color: 'var(--color-brand)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}
-            >
-              Módulo 06 · Plan Oficial de Paletizado y Rótulos de Muelle
-            </span>
-          </div>
-
-          <h1
-            style={{
-              margin: '4px 0 6px 0',
-              fontSize: '28px',
-              fontFamily: 'var(--font-display)',
-              fontWeight: 600,
-              color: 'var(--color-brand-deep)'
-            }}
-          >
-            Packing List — Orden {plan.numero_orden}
+          <p className="eyebrow">Orden {plan.numero_orden} · Fase 4 de 8</p>
+          <h1 style={{ margin: '0 0 6px', fontSize: '30px', fontFamily: 'var(--font-display)', fontWeight: 600, color: 'var(--color-brand-deep-text)' }}>
+            Packing list
           </h1>
-
-          {/* Cinta de Metadatos del Embarque */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            <div>
-              <span>Proveedor: </span>
-              <strong style={{ color: 'var(--color-text-primary)' }}>{plan.proveedor || 'Sin proveedor asignado'}</strong>
-            </div>
-            <div>
-              <span>Contenedor: </span>
-              <strong style={{ color: 'var(--color-brand)' }}>{plan.contenedor}</strong>
-            </div>
-            <div>
-              <span>Fecha de emisión: </span>
-              <strong style={{ color: 'var(--color-text-primary)' }}>{plan.fecha_emision || 'Reciente'}</strong>
-            </div>
-            <div>
-              <span>Prefijo oficial: </span>
-              <code style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand-deep)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                {plan.prefijo_almacen}
-              </code>
-            </div>
-            <div>
-              <span>Total líneas de producto: </span>
-              <strong style={{ color: 'var(--color-text-primary)' }}>{plan.productos.length}</strong>
-            </div>
-          </div>
+          <p className="muted" style={{ margin: 0 }}>
+            {plan.proveedor} · {contenedor} · emitida el {plan.fecha_emision} · llega al almacén <strong>{plan.prefijo_almacen}</strong>
+          </p>
         </div>
 
-        {/* Acciones Superiores */}
         <div className="no-print" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-          {copiedTag && (
-            <span style={{ fontSize: '12px', color: 'var(--color-success)', fontWeight: 600 }}>
-              Código {copiedTag} copiado
-            </span>
-          )}
-          {copiedAll && (
-            <span style={{ fontSize: '12px', color: 'var(--color-success)', fontWeight: 600 }}>
-              Todos los códigos copiados
-            </span>
-          )}
-
-          <button
-            type="button"
-            className="button secondary"
-            onClick={handleCopyAllTags}
-            title="Copiar todos los códigos correlativos al portapapeles"
-          >
-            Copiar todos los códigos
-          </button>
-
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() => window.print()}
-            title="Imprimir el packing list oficial en hoja A4"
-          >
-            Imprimir
-          </button>
-
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => packingListService.exportPackingListToExcel(plan)}
-            title="Descargar archivo Excel con la hoja de resumen y la lista de rótulos con casillas para muelle"
-          >
-            Descargar Excel para muelle (.xlsx)
-          </button>
-
           {onOpenReceptions && (
-            <button
-              type="button"
-              className="button secondary"
-              onClick={onOpenReceptions}
-              title="Abrir el Módulo 04 de Recepciones para validar descargas en muelle"
-            >
-              Ir a Recepciones RFID
+            <button type="button" className="button secondary" onClick={onOpenReceptions}>
+              Ir a recepciones
             </button>
           )}
+          <button type="button" className="button secondary" onClick={() => window.print()}>
+            Imprimir
+          </button>
+          <button type="button" className="button primary" onClick={() => packingListService.exportPackingListToExcel(plan)}>
+            Descargar Excel
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* 2. Tira Horizontal de Indicadores Clave del Embarque (skill_design.md) */}
-      <section className="indicator-strip" aria-label="Resumen global del contenedor">
+      {/* Indicadores */}
+      <section className="indicator-strip" aria-label="Resumen del embarque">
         <div className="indicator-card">
-          <span className="indicator-label">Unidades requeridas</span>
-          <span className="indicator-value">{plan.total_unidades.toLocaleString('es-PE')}</span>
-          <span className="indicator-context">En contenedor {plan.contenedor}</span>
-        </div>
-
-        <div className="indicator-card">
-          <span className="indicator-label">Cajas calculadas</span>
-          <span className="indicator-value">{plan.total_cajas.toLocaleString('es-PE')}</span>
-          <span className="indicator-context">Bultos secundarios totales</span>
-        </div>
-
-        <div className="indicator-card">
-          <span className="indicator-label">Paletas completas</span>
-          <span className="indicator-value" style={{ color: 'var(--color-brand)' }}>
-            {plan.total_paletas_completas}
-          </span>
-          <span className="indicator-context">Estiba estándar homogénea</span>
-        </div>
-
-        <div className="indicator-card">
-          <span className="indicator-label">Cajas pucho (sueltas)</span>
-          <span
-            className="indicator-value"
-            style={{ color: plan.total_puchos > 0 ? 'var(--color-warning)' : 'inherit' }}
-          >
-            {plan.total_puchos}
-          </span>
+          <span className="indicator-label">Unidades</span>
+          <span className="indicator-value">{fmt(plan.total_unidades)}</span>
           <span className="indicator-context">
-            {puchoConsolidations.length > 0
-              ? `${puchoConsolidations.length} SKU(s) a consolidar`
-              : plan.total_puchos > 0
-              ? 'Paleta con cajas parciales'
-              : 'Sin sobrantes sueltos'}
+            {plan.productos.length} {plan.productos.length === 1 ? 'producto' : 'productos'}
+            {plan.peso_total_kg ? ` · ${fmt(Math.round(plan.peso_total_kg))} kg aprox.` : ''}
           </span>
         </div>
-
         <div className="indicator-card">
-          <span className="indicator-label">Total paletas físicas</span>
-          <span className="indicator-value" style={{ color: 'var(--color-success)' }}>
-            {plan.total_bultos_previstos}
+          <span className="indicator-label">Paletas a recibir</span>
+          <span className="indicator-value">{fmt(plan.total_bultos_previstos)}</span>
+          <span className="indicator-context">
+            {plan.total_paletas_completas} completas · {plan.total_puchos} {plan.total_puchos === 1 ? 'pucho' : 'puchos'}
           </span>
-          <span className="indicator-context">Bultos a descargar en muelle</span>
         </div>
-
         <div className="indicator-card">
-          <span className="indicator-label">Buffer de contingencia</span>
-          <span className="indicator-value" style={{ color: 'var(--color-brand-deep)' }}>
-            +{plan.etiquetas_reserva.length}
+          <span className="indicator-label">Cajas sin paletizar</span>
+          <span className="indicator-value">{fmt(totalCajasSueltas)}</span>
+          <span className="indicator-context">Productos que se controlan por caja</span>
+        </div>
+        <div className="indicator-card">
+          <span className="indicator-label">Equipos con serie</span>
+          <span className="indicator-value">{fmt(totalSeries)}</span>
+          <span className="indicator-context">Se registra la serie al recibir</span>
+        </div>
+        <div className="indicator-card">
+          <span className="indicator-label">Códigos reservados</span>
+          <span className="indicator-value">{fmt(totalCodigos)}</span>
+          <span className="indicator-context">
+            {plan.etiquetas_bultos.length} de paleta + {plan.etiquetas_reserva.length} de contingencia
           </span>
-          <span className="indicator-context">Rótulos para excedentes</span>
         </div>
       </section>
 
-      {/* 2.5 Panel de Alerta Operativa: Consolidación de Puchos Requerida */}
-      {puchoConsolidations.length > 0 && (
-        <section
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            borderLeft: '4px solid var(--color-warning)',
-            borderRadius: '6px',
-            padding: '18px 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px'
-          }}
-          aria-label="Alerta de consolidación de puchos"
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    background: '#FFF8EE',
-                    color: 'var(--color-warning)',
-                    border: '1px solid #F6E2C5',
-                    padding: '2px 8px',
-                    borderRadius: '4px'
-                  }}
-                >
-                  Regla Operativa · Máximo 1 pucho por producto
-                </span>
-                <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                  {puchoConsolidations.length} {puchoConsolidations.length === 1 ? 'producto requiere' : 'productos requieren'} consolidación física en muelle
-                </span>
-              </div>
-              <h2
-                style={{
-                  margin: '6px 0 0 0',
-                  fontSize: '18px',
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 600,
-                  color: 'var(--color-brand-deep)'
-                }}
-              >
-                Consolidación preventiva de paletas pucho en almacén
-              </h2>
-              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)', maxWidth: '900px' }}>
-                Se detectaron productos en este embarque que traen cajas sueltas (puchos) y que ya cuentan con un pucho previo en almacén.
-                Para evitar ocupar dos posiciones de paleta con el mismo producto, los estibadores deben unificar físicamente las cajas al momento de descargar.
-              </p>
-            </div>
+      {/* Atención requerida */}
+      {atenciones > 0 && (
+        <section className="attention-panel" aria-label="Atención requerida">
+          <div className="attention-panel-header">
+            <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Atención requerida</h2>
+            <span className="muted">{atenciones} {atenciones === 1 ? 'punto' : 'puntos'}</span>
           </div>
-
-          {/* Tabla de Consolidaciones */}
-          <div className="table-wrap" style={{ overflowX: 'auto', margin: '4px 0 0 0' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: 'var(--color-canvas)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                  <th style={{ padding: '8px 10px' }}>Producto</th>
-                  <th style={{ padding: '8px 10px' }}>Pucho actual en almacén</th>
-                  <th style={{ padding: '8px 10px' }}>Pucho en contenedor</th>
-                  <th style={{ padding: '8px 10px', textAlign: 'center' }}>Total cajas</th>
-                  <th style={{ padding: '8px 10px' }}>Diagnóstico de estiba</th>
-                  <th style={{ padding: '8px 10px' }}>Instrucción para descarga</th>
-                </tr>
-              </thead>
-              <tbody>
-                {puchoConsolidations.map((item) => (
-                  <tr key={item.id_producto} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td style={{ padding: '10px' }}>
-                      <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{item.nombre}</div>
-                      <code style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>{item.sku}</code>
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      <div>
-                        <strong style={{ color: 'var(--color-warning)' }}>{item.cajas_existentes} cajas</strong>
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                        Tag: <code style={{ fontWeight: 600 }}>{item.tag_existente}</code> ({item.ubicacion_existente})
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      <div>
-                        <strong style={{ color: 'var(--color-brand)' }}>+{item.cajas_nuevas} cajas</strong>
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
-                        Tag previsto: <code style={{ fontWeight: 600 }}>{item.tag_nuevo}</code>
-                      </div>
-                    </td>
-                    <td style={{ padding: '10px', textAlign: 'center' }}>
-                      <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--color-text-primary)' }}>
-                        {item.total_cajas} / {item.cajas_por_paleta}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>cajas / paleta</div>
-                    </td>
-                    <td style={{ padding: '10px' }}>
-                      <span
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          border: '1px solid var(--color-border)',
-                          background:
-                            item.tipo_caso === 'CASO_2_COMPLETO'
-                              ? '#EEF8F1'
-                              : item.tipo_caso === 'CASO_3_COMPLETO_MAS_PUCHO'
-                              ? 'var(--color-brand-soft)'
-                              : '#FFF8EE',
-                          color: item.badge_color
-                        }}
-                      >
-                        {item.badge_texto}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px', fontSize: '12px', color: 'var(--color-text-primary)', maxWidth: '340px' }}>
-                      {item.instruccion}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="attention-list">
+            {sinRegla.map((p) => (
+              <div key={`regla-${p.id_producto}-${p.nombre}`} className="attention-item" style={{ borderLeft: '3px solid var(--color-danger)' }}>
+                <div className="attention-item-content">
+                  <span className="attention-item-module">Falta regla de empaque</span>
+                  <span className="attention-item-desc">
+                    <strong>{p.nombre}</strong> no tiene {modoDe(p) === 'PICKING_CAJA' ? 'unidades por caja' : 'unidades por empaque ni empaques por paleta'}.
+                    No se le asignaron códigos de paleta. Complétala en Maestros y empaque.
+                  </span>
+                </div>
+              </div>
+            ))}
+            {consolidaciones.map((c) => (
+              <div key={`pucho-${c.id_producto}`} className="attention-item" style={{ borderLeft: '3px solid var(--color-warning)' }}>
+                <div className="attention-item-content">
+                  <span className="attention-item-module">
+                    Unir pucho · {c.titulo_caso} ({c.badge_texto})
+                  </span>
+                  <span className="attention-item-desc">
+                    <strong>{c.nombre}</strong>: ya hay un pucho de {c.cajas_existentes} cajas en {c.ubicacion_existente} ({c.tag_existente}). {c.instruccion}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
       )}
 
-      {/* 3. Selector de Pestañas de la Vista Completa */}
-      <div
-        className="no-print"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          borderBottom: '1px solid var(--color-border)',
-          paddingBottom: '8px'
-        }}
-      >
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            type="button"
-            className={`button ${selectedTab === 'both' ? 'primary' : 'secondary'} button-sm`}
-            onClick={() => setSelectedTab('both')}
-          >
-            Ver todo el desglose completo
-          </button>
-          <button
-            type="button"
-            className={`button ${selectedTab === 'summary' ? 'primary' : 'secondary'} button-sm`}
-            onClick={() => setSelectedTab('summary')}
-          >
-            1. Resumen técnico por producto ({plan.productos.length})
-          </button>
-          <button
-            type="button"
-            className={`button ${selectedTab === 'pallets' ? 'primary' : 'secondary'} button-sm`}
-            onClick={() => setSelectedTab('pallets')}
-          >
-            2. Hoja maestra de paletas y rótulos ({allPallets.length})
-          </button>
-        </div>
+      {/* Pestañas */}
+      <nav className="module-tabs no-print" aria-label="Secciones del packing list">
+        <button type="button" className={pestana === 'productos' ? 'active' : ''} onClick={() => setPestana('productos')}>
+          Por producto ({plan.productos.length})
+        </button>
+        <button type="button" className={pestana === 'codigos' ? 'active' : ''} onClick={() => setPestana('codigos')}>
+          Códigos de paleta ({plan.etiquetas_bultos.length})
+        </button>
+        <button type="button" className={pestana === 'contingencia' ? 'active' : ''} onClick={() => setPestana('contingencia')}>
+          Contingencia ({plan.etiquetas_reserva.length})
+        </button>
+      </nav>
 
-        <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-          {verifiedTags.size > 0 ? (
-            <strong style={{ color: 'var(--color-success)' }}>
-              {verifiedTags.size} de {allPallets.length} paletas punteadas en muelle
-            </strong>
-          ) : (
-            'Todas las paletas cuentan con códigos únicos reservados de forma inmutable'
-          )}
-        </span>
-      </div>
-
-      {/* =========================================================================
-          SECCIÓN 1: RESUMEN TÉCNICO Y REGLAS DE ESTIBA POR PRODUCTO
-          ========================================================================= */}
-      {(selectedTab === 'both' || selectedTab === 'summary') && (
-        <div
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '6px',
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 600,
-                  color: 'var(--color-brand-deep)'
-                }}
-              >
-                1. Resumen técnico y desglose de estiba por producto
-              </h2>
-              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-                Cálculo de descomposición según las reglas oficiales de empaque registradas en catálogo (cajas/camada, camadas/paleta y unidades/caja).
-              </p>
-            </div>
-
-            <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', background: 'var(--color-canvas)', padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--color-border)' }}>
-              {plan.productos.length} productos proyectados
-            </span>
+      {/* Por producto */}
+      {pestana === 'productos' && (
+        <section className="panel" aria-label="Desglose por producto">
+          <div style={{ marginBottom: '14px' }}>
+            <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Cómo llega cada producto</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Calculado con la regla de empaque del catálogo. Solo las paletas llevan tag RFID; lo que va por caja se cuenta y la maquinaria se identifica por su serie.
+            </p>
           </div>
-
-          <div className="table-wrap" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+          <div className="table-wrap">
+            <table>
               <thead>
-                <tr style={{ background: 'var(--color-canvas)', borderBottom: '2px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                  <th style={{ padding: '10px 8px', width: '36px', textAlign: 'center' }}>#</th>
-                  <th style={{ padding: '10px 10px', minWidth: '110px' }}>SKU</th>
-                  <th style={{ padding: '10px 12px', minWidth: '220px' }}>Producto</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Unid. pedidas</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Unid/Caja</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Cajas/Paleta</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Unid/Paleta</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>Total cajas</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', background: 'var(--color-brand-soft)' }}>
-                    Paletas completas
-                  </th>
-                  <th style={{ padding: '10px 8px', textAlign: 'center' }}>Cajas pucho</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Unid. pucho</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 600 }}>Total paletas</th>
-                  <th style={{ padding: '10px 12px', minWidth: '240px' }}>Códigos asignados</th>
+                <tr>
+                  <th>Producto</th>
+                  <th>Modo</th>
+                  <th className="num-col">Unidades</th>
+                  <th>Empaque</th>
+                  <th>Llega como</th>
+                  <th className="num-col">Paletas</th>
+                  <th>Códigos de paleta</th>
                 </tr>
               </thead>
               <tbody>
-                {plan.productos.map((prod, idx) => {
-                  const completasTags = prod.paletas.filter((p) => p.tipo === 'COMPLETO').map((p) => p.uid_tag)
-                  const puchoTag = prod.paletas.find((p) => p.tipo === 'PUCHO')?.uid_tag
-
+                {plan.productos.map((p, i) => {
+                  const modo = modoDe(p)
+                  const codigos = p.paletas.map((t) => t.uid_tag)
+                  const consol = consolidacionPorProducto.get(p.id_producto)
                   return (
-                    <tr
-                      key={prod.id_producto}
-                      style={{
-                        borderBottom: '1px solid var(--color-border)',
-                        background: idx % 2 === 0 ? 'var(--color-surface)' : '#FAFCFD'
-                      }}
-                    >
-                      <td style={{ padding: '10px 8px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
-                        {idx + 1}
+                    <tr key={`${p.id_producto}-${i}`}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{p.nombre}</div>
+                        <div className="muted" style={{ fontSize: '13px' }}>SKU {p.sku}</div>
                       </td>
-                      <td style={{ padding: '10px 10px' }}>
-                        <code style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand-deep)' }}>
-                          {prod.sku}
-                        </code>
+                      <td>
+                        <span className="modo-pill">{MODO_LABEL[modo]}</span>
                       </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <strong style={{ color: 'var(--color-text-primary)' }}>{prod.nombre}</strong>
+                      <td className="num-col" style={{ fontWeight: 600 }}>{fmt(p.cantidad_pedida)}</td>
+                      <td className="muted" style={{ fontSize: '14px' }}>
+                        {modo === 'SERIALIZADO'
+                          ? '1 unidad = 1 serie'
+                          : p.sin_regla && !p.unidades_por_caja
+                          ? 'Sin regla'
+                          : modo === 'PICKING_CAJA'
+                          ? `${fmt(p.unidades_por_caja)} u por ${empaque(p, 1)}`
+                          : p.sin_regla
+                          ? `${fmt(p.unidades_por_caja)} u por ${empaque(p, 1)} · sin paleta definida`
+                          : `${fmt(p.unidades_por_caja)} u por ${empaque(p, 1)} · ${p.cajas_por_paleta} ${empaque(p, p.cajas_por_paleta)} por paleta`}
                       </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>
-                        {prod.cantidad_pedida.toLocaleString('es-PE')}
-                      </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
-                        {prod.unidades_por_caja}
-                      </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right', color: 'var(--color-text-secondary)' }}>
-                        {prod.cajas_por_paleta}
-                      </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'right', color: 'var(--color-brand)' }}>
-                        {prod.unidades_por_paleta.toLocaleString('es-PE')}
-                      </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>
-                        {prod.cajas_totales.toLocaleString('es-PE')}
-                      </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'center', background: '#F4F9FA' }}>
-                        <span
-                          style={{
-                            background: 'var(--color-brand-soft)',
-                            color: 'var(--color-brand-deep)',
-                            padding: '3px 10px',
-                            borderRadius: '4px',
-                            fontWeight: 700,
-                            fontSize: '12px'
-                          }}
-                        >
-                          {prod.paletas_completas}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'center' }}>
-                        {prod.cajas_pucho > 0 ? (
-                          <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                            <span
-                              style={{
-                                background: '#FFF8EE',
-                                color: 'var(--color-warning)',
-                                border: '1px solid #F5D399',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontWeight: 600,
-                                fontSize: '12px'
-                              }}
-                            >
-                              {prod.cajas_pucho} caja(s)
-                            </span>
-                            {consolidationByProdId.has(prod.id_producto) && (
-                              <span
-                                style={{
-                                  fontSize: '10px',
-                                  fontWeight: 600,
-                                  background: '#FFF8EE',
-                                  color: 'var(--color-warning)',
-                                  padding: '1px 6px',
-                                  borderRadius: '3px',
-                                  border: '1px solid #F6E2C5',
-                                  whiteSpace: 'nowrap'
-                                }}
-                                title="Existe un pucho en almacén para este SKU. Se debe unificar en muelle."
-                              >
-                                Unificar pucho
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>0</span>
+                      <td style={{ color: p.sin_regla ? 'var(--color-danger)' : undefined }}>
+                        {desglose(p)}
+                        {consol && (
+                          <div style={{ fontSize: '13px', color: 'var(--color-warning)', fontWeight: 600 }}>Unir con pucho {consol.tag_existente}</div>
                         )}
                       </td>
-                      <td style={{ padding: '10px 8px', textAlign: 'right', color: prod.unidades_pucho > 0 ? 'var(--color-warning)' : 'var(--color-text-secondary)' }}>
-                        {prod.unidades_pucho > 0 ? prod.unidades_pucho.toLocaleString('es-PE') : '0'}
-                      </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                        {prod.total_bultos}
-                      </td>
-                      <td style={{ padding: '8px 12px' }}>
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                          {completasTags.map((t) => (
-                            <code
-                              key={t}
-                              onClick={() => handleCopyTag(t)}
-                              style={{
-                                background: 'var(--color-canvas)',
-                                border: '1px solid var(--color-border)',
-                                padding: '2px 6px',
-                                borderRadius: '3px',
-                                fontSize: '11px',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                color: 'var(--color-text-primary)'
-                              }}
-                              title="Clic para copiar código"
-                            >
-                              {t}
-                            </code>
-                          ))}
-                          {puchoTag && (
-                            <code
-                              key={puchoTag}
-                              onClick={() => handleCopyTag(puchoTag)}
-                              style={{
-                                background: '#FFF8EE',
-                                border: '1px solid #F5D399',
-                                color: 'var(--color-warning)',
-                                padding: '2px 6px',
-                                borderRadius: '3px',
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                cursor: 'pointer'
-                              }}
-                              title={
-                                consolidationByProdId.has(prod.id_producto)
-                                  ? `Código previsto para pucho. Requiere unificación con ${consolidationByProdId.get(prod.id_producto)?.tag_existente}. Clic para copiar.`
-                                  : 'Código reservado para la paleta pucho (Clic para copiar)'
-                              }
-                            >
-                              {puchoTag} (Pucho)
-                            </code>
-                          )}
-                        </div>
+                      <td className="num-col" style={{ fontWeight: 600 }}>{modo === 'PALETIZADO' ? p.total_bultos : '—'}</td>
+                      <td style={{ fontSize: '14px' }}>
+                        {codigos.length > 0 ? (
+                          <span title={codigos.join(', ')}>{rangosDeCodigos(codigos).join(', ')}</span>
+                        ) : (
+                          <span className="muted">{modo === 'PALETIZADO' ? '—' : 'No lleva'}</span>
+                        )}
                       </td>
                     </tr>
                   )
                 })}
               </tbody>
-              {/* Fila de Totales Generales */}
               <tfoot>
-                <tr style={{ background: 'var(--color-canvas)', borderTop: '2px solid var(--color-border)', fontWeight: 700 }}>
-                  <td colSpan={3} style={{ padding: '12px 12px', textAlign: 'right', color: 'var(--color-brand-deep)' }}>
-                    Totales acumulados del embarque:
+                <tr style={{ fontWeight: 700 }}>
+                  <td colSpan={2}>Total</td>
+                  <td className="num-col">{fmt(plan.total_unidades)}</td>
+                  <td />
+                  <td className="muted" style={{ fontWeight: 500 }}>
+                    {plan.total_paletas_completas} completas · {plan.total_puchos} puchos · {fmt(totalCajasSueltas)} cajas · {fmt(totalSeries)} series
                   </td>
-                  <td style={{ padding: '12px 10px', textAlign: 'right' }}>
-                    {totals.cantidadPedida.toLocaleString('es-PE')}
-                  </td>
-                  <td colSpan={3} style={{ padding: '12px 8px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
-                    —
-                  </td>
-                  <td style={{ padding: '12px 10px', textAlign: 'right' }}>
-                    {totals.cajasTotales.toLocaleString('es-PE')}
-                  </td>
-                  <td style={{ padding: '12px 10px', textAlign: 'center', color: 'var(--color-brand)' }}>
-                    {totals.paletasCompletas} paleta(s)
-                  </td>
-                  <td style={{ padding: '12px 8px', textAlign: 'center', color: 'var(--color-warning)' }}>
-                    {totals.cajasPucho} caja(s)
-                  </td>
-                  <td style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--color-warning)' }}>
-                    {totals.unidadesPucho.toLocaleString('es-PE')}
-                  </td>
-                  <td style={{ padding: '12px 10px', textAlign: 'center', color: 'var(--color-success)', fontSize: '14px' }}>
-                    {totals.totalBultos} paleta(s)
-                  </td>
-                  <td style={{ padding: '12px 12px', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
-                    +{plan.etiquetas_reserva.length} etiquetas de contingencia
-                  </td>
+                  <td className="num-col">{plan.total_bultos_previstos}</td>
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* =========================================================================
-          SECCIÓN 2: HOJA MAESTRA DE RÓTULOS PALETA POR PALETA (PARA DESCARGA EN MUELLE)
-          ========================================================================= */}
-      {(selectedTab === 'both' || selectedTab === 'pallets') && (
-        <div
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '6px',
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+      {/* Códigos de paleta */}
+      {pestana === 'codigos' && (
+        <section className="panel" aria-label="Códigos de paleta">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap', marginBottom: '14px' }}>
             <div>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 600,
-                  color: 'var(--color-brand-deep)'
-                }}
-              >
-                2. Hoja maestra de rótulos individuales paleta por paleta (Checklist de descarga en muelle)
-              </h2>
-              <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-                Cada fila representa una paleta física con su código correlativo oficial reservado para impresión o escaneo RFID/NFC en el muelle de recepción.
+              <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Códigos de paleta</h2>
+              <p className="muted" style={{ margin: '4px 0 0' }}>
+                Reservados para esta orden. En Operaciones cada paleta recibe su tag RFID con este código.
               </p>
             </div>
-
-            {/* Barra de Filtros y Búsqueda de Paletas */}
-            <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div className="no-print" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <input
                 type="search"
-                placeholder="Buscar código, SKU o producto..."
-                value={palletSearch}
-                onChange={(e) => setPalletSearch(e.target.value)}
-                style={{
-                  padding: '6px 12px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  minWidth: '220px'
-                }}
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar código o producto"
+                aria-label="Buscar código o producto"
+                style={{ minWidth: '220px' }}
               />
-
-              <select
-                value={palletTypeFilter}
-                onChange={(e) => setPalletTypeFilter(e.target.value as any)}
-                style={{
-                  padding: '6px 10px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  background: 'var(--color-surface)'
-                }}
-              >
-                <option value="TODOS">Todos los tipos ({allPallets.length})</option>
-                <option value="COMPLETO">Solo paletas estándar completas</option>
-                <option value="PUCHO">Solo puchos (cajas sueltas)</option>
-                <option value="RESERVA_EXCEDENTE">Solo etiquetas de contingencia</option>
+              <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value as FiltroTipo)} aria-label="Tipo de paleta">
+                <option value="TODOS">Todas las paletas</option>
+                <option value="COMPLETO">Solo completas</option>
+                <option value="PUCHO">Solo puchos</option>
               </select>
-
               <button
                 type="button"
-                className="button secondary button-sm"
-                onClick={handleToggleSelectAllVerified}
+                className="button secondary"
+                disabled={plan.etiquetas_bultos.length === 0}
+                onClick={() => copiar(plan.etiquetas_bultos.map((t) => t.uid_tag).join('\n'), '__todos')}
               >
-                {verifiedTags.size === filteredPallets.length && filteredPallets.length > 0
-                  ? 'Desmarcar verificación'
-                  : 'Marcar todas verificadas'}
+                {copiado === '__todos' ? 'Copiados' : 'Copiar todos'}
               </button>
             </div>
           </div>
 
-          <div className="table-wrap" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: 'var(--color-canvas)', borderBottom: '2px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                  <th style={{ padding: '10px 8px', width: '36px', textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={filteredPallets.length > 0 && verifiedTags.size === filteredPallets.length}
-                      onChange={handleToggleSelectAllVerified}
-                      title="Marcar todas como punteadas en muelle"
-                    />
-                  </th>
-                  <th style={{ padding: '10px 8px', width: '40px', textAlign: 'center' }}>#</th>
-                  <th style={{ padding: '10px 10px', minWidth: '120px' }}>Código / Tag RFID</th>
-                  <th style={{ padding: '10px 10px', minWidth: '160px' }}>Tipo de bulto</th>
-                  <th style={{ padding: '10px 10px', minWidth: '110px' }}>SKU</th>
-                  <th style={{ padding: '10px 12px', minWidth: '220px' }}>Producto</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Cajas</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'right' }}>Unidades</th>
-                  <th style={{ padding: '10px 12px', minWidth: '120px' }}>Nivel de estiba</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'center', width: '130px' }}>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPallets.length === 0 ? (
+          {plan.etiquetas_bultos.length === 0 ? (
+            <p className="muted" style={{ padding: '20px', textAlign: 'center' }}>
+              Esta orden no tiene productos paletizados, así que no lleva códigos de paleta.
+            </p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={10} style={{ padding: '28px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-                      No se encontraron paletas con los filtros seleccionados.
-                    </td>
+                    <th className="num-col">N°</th>
+                    <th>Código</th>
+                    <th>Tipo</th>
+                    <th>Producto</th>
+                    <th className="num-col">Empaques</th>
+                    <th className="num-col">Unidades</th>
+                    <th className="no-print">Acciones</th>
                   </tr>
-                ) : (
-                  filteredPallets.map((item) => {
-                    const isVerified = verifiedTags.has(item.uid_tag)
-                    const percent = item.unidadesPorPaleta > 0 && item.unidades > 0
-                      ? Math.min(100, Math.round((item.unidades / item.unidadesPorPaleta) * 100))
-                      : item.tipo === 'COMPLETO' ? 100 : 0
-
-                    return (
-                      <tr
-                        key={item.uid_tag + '-' + item.correlativo}
-                        style={{
-                          borderBottom: '1px solid var(--color-border)',
-                          backgroundColor: isVerified
-                            ? '#F1F9F4'
-                            : item.tipo === 'PUCHO'
-                            ? '#FFFDF9'
-                            : item.tipo === 'RESERVA_EXCEDENTE'
-                            ? '#FBFBFC'
-                            : 'var(--color-surface)'
-                        }}
-                      >
-                        <td style={{ padding: '10px 8px', textAlign: 'center' }}>
-                          <input
-                            type="checkbox"
-                            checked={isVerified}
-                            onChange={() => handleToggleVerified(item.uid_tag)}
-                            title="Marcar como recibida y conforme en muelle"
-                          />
-                        </td>
-                        <td style={{ padding: '10px 8px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
-                          {item.correlativo}
-                        </td>
-                        <td style={{ padding: '10px 10px' }}>
-                          <code
-                            style={{
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              color:
-                                item.tipo === 'PUCHO'
-                                  ? 'var(--color-warning)'
-                                  : item.tipo === 'RESERVA_EXCEDENTE'
-                                  ? 'var(--color-text-secondary)'
-                                  : 'var(--color-brand)',
-                              background:
-                                item.tipo === 'PUCHO'
-                                  ? '#FFF8EE'
-                                  : item.tipo === 'RESERVA_EXCEDENTE'
-                                  ? 'var(--color-canvas)'
-                                  : 'var(--color-brand-soft)',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              border:
-                                item.tipo === 'RESERVA_EXCEDENTE'
-                                  ? '1px dashed var(--color-border)'
-                                  : '1px solid transparent'
-                            }}
-                          >
-                            {item.uid_tag}
-                          </code>
-                        </td>
-                        <td style={{ padding: '10px 10px' }}>
-                          {item.tipo === 'COMPLETO' && (
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-brand-deep)' }}>
-                              Paleta estándar completa
-                            </span>
-                          )}
-                          {item.tipo === 'PUCHO' && (
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-warning)' }}>
-                              Pucho (Cajas sueltas)
-                            </span>
-                          )}
-                          {item.tipo === 'RESERVA_EXCEDENTE' && (
-                            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-secondary)' }}>
-                              Reserva de muelle (Contingencia)
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 10px' }}>
-                          <code style={{ fontSize: '12px', color: 'var(--color-brand-deep)' }}>{item.sku}</code>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                            {item.nombre}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600 }}>
-                          {item.cajas > 0 ? item.cajas.toLocaleString('es-PE') : '—'}
-                        </td>
-                        <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>
-                          {item.unidades > 0 ? item.unidades.toLocaleString('es-PE') : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          {item.tipo === 'RESERVA_EXCEDENTE' ? (
-                            <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>Disponible muelle</span>
+                </thead>
+                <tbody>
+                  {codigosFiltrados.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: '24px' }}>
+                        No hay códigos que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  ) : (
+                    codigosFiltrados.map((t) => (
+                      <tr key={t.uid_tag}>
+                        <td className="num-col muted">{t.bulto_numero}</td>
+                        <td style={{ fontWeight: 700, color: 'var(--color-brand)' }}>{t.uid_tag}</td>
+                        <td>
+                          {t.tipo === 'PUCHO' ? (
+                            <span style={{ color: 'var(--color-warning)', fontWeight: 600 }}>Pucho</span>
                           ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <div style={{ flex: 1, background: '#E2E8F0', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-                                <div
-                                  style={{
-                                    width: `${percent}%`,
-                                    height: '100%',
-                                    background: item.tipo === 'PUCHO' ? 'var(--color-warning)' : 'var(--color-success)'
-                                  }}
-                                />
-                              </div>
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: item.tipo === 'PUCHO' ? 'var(--color-warning)' : 'var(--color-success)', width: '34px', textAlign: 'right' }}>
-                                {percent}%
-                              </span>
-                            </div>
+                            'Completa'
                           )}
                         </td>
-                        <td style={{ padding: '8px 8px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                            <button
-                              type="button"
-                              className="button secondary button-sm no-print"
-                              style={{ padding: '2px 8px', fontSize: '11px' }}
-                              onClick={() => handleCopyTag(item.uid_tag)}
-                              title="Copiar código al portapapeles"
-                            >
-                              {copiedTag === item.uid_tag ? 'Copiado' : 'Copiar'}
+                        <td>
+                          {t.nombre}
+                          <div className="muted" style={{ fontSize: '13px' }}>SKU {t.sku}</div>
+                        </td>
+                        <td className="num-col">{fmt(t.cajas)}</td>
+                        <td className="num-col">{fmt(t.unidades)}</td>
+                        <td className="no-print">
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button type="button" className="button secondary button-sm" onClick={() => copiar(t.uid_tag, t.uid_tag)}>
+                              {copiado === t.uid_tag ? 'Copiado' : 'Copiar'}
                             </button>
-                            <button
-                              type="button"
-                              className="button secondary button-sm no-print"
-                              style={{ padding: '2px 8px', fontSize: '11px', fontWeight: 600 }}
-                              onClick={() => handleOpenSticker(item)}
-                              title="Ver e imprimir etiqueta térmica de esta paleta"
-                            >
-                              Sticker
+                            <button type="button" className="button secondary button-sm" onClick={() => abrirSticker(t)}>
+                              Etiqueta
                             </button>
                           </div>
                         </td>
                       </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       )}
 
-      {/* =========================================================================
-          SECCIÓN 3: RÓTULOS DE CONTINGENCIA / RESERVA DE MUELLE
-          ========================================================================= */}
-      <div
-        style={{
-          background: 'var(--color-canvas)',
-          border: '1px solid var(--color-border)',
-          borderRadius: '6px',
-          padding: '16px 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '14px'
-        }}
-      >
-        <div>
-          <strong style={{ fontSize: '14px', color: 'var(--color-brand-deep)' }}>
-            Etiquetas pre-asignadas de contingencia para excedentes en muelle ({plan.etiquetas_reserva.length} códigos):
-          </strong>
-          <p style={{ margin: '3px 0 0 0', fontSize: '13px', color: 'var(--color-text-secondary)', maxWidth: '640px' }}>
-            Si durante la descarga física en muelle el contenedor presenta paletas o bultos adicionales no contemplados, el operario debe rotular con estos códigos reservados para conciliar sin detener la operación.
+      {/* Contingencia */}
+      {pestana === 'contingencia' && (
+        <section className="panel" aria-label="Códigos de contingencia">
+          <h2 style={{ margin: 0, fontSize: '20px', fontFamily: 'var(--font-display)', fontWeight: 600 }}>Códigos de contingencia</h2>
+          <p className="muted" style={{ margin: '4px 0 14px', maxWidth: '760px' }}>
+            Si en Operaciones aparece una paleta que no estaba prevista, se rotula con uno de estos códigos para no detener la descarga.
+            Solo se pueden usar cuando el producto ya agotó su lote de códigos separados. Los que no se usen se liberan al liquidar la recepción.
           </p>
-        </div>
+          {plan.etiquetas_reserva.length === 0 ? (
+            <p className="muted">Esta orden no reservó códigos de contingencia porque no tiene productos paletizados.</p>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {plan.etiquetas_reserva.map((r) => (
+                <button
+                  key={r.uid_tag}
+                  type="button"
+                  className="button secondary"
+                  onClick={() => copiar(r.uid_tag, r.uid_tag)}
+                  title="Copiar código"
+                  style={{ fontWeight: 700, borderStyle: 'dashed', opacity: r.liberado ? 0.5 : 1 }}
+                >
+                  {r.uid_tag}
+                  {copiado === r.uid_tag ? ' · copiado' : r.liberado ? ' · liberado' : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {plan.etiquetas_reserva.map((r) => (
-            <code
-              key={r.uid_tag}
-              onClick={() => handleCopyTag(r.uid_tag)}
-              style={{
-                background: 'var(--color-surface)',
-                border: '1px dashed var(--color-brand)',
-                padding: '4px 8px',
-                borderRadius: '4px',
-                fontSize: '12px',
-                fontWeight: 700,
-                color: 'var(--color-brand)',
-                cursor: 'pointer'
-              }}
-              title="Clic para copiar código de contingencia"
-            >
-              {r.uid_tag}
-            </code>
-          ))}
-        </div>
-      </div>
-
-      {/* Modal de Etiqueta Térmica de Paleta */}
-      <PalletStickerModal
-        isOpen={!!selectedSticker}
-        onClose={() => setSelectedSticker(null)}
-        data={selectedSticker}
-      />
+      <PalletStickerModal isOpen={!!sticker} onClose={() => setSticker(null)} data={sticker} />
     </div>
   )
 }

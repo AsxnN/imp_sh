@@ -132,8 +132,8 @@ export function InventoryFlowChart({ data7Days, data4Weeks }: Props) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
-              Flujo de inventario en muelle y despacho
+            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
+              Flujo de inventario en Operaciones y despacho
             </h2>
             <span
               style={{
@@ -357,7 +357,7 @@ export function InventoryFlowChart({ data7Days, data4Weeks }: Props) {
               <strong style={{ fontFamily: 'monospace' }}>{hoveredPoint.entradas.toLocaleString('es-PE')} unid</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-              <span style={{ color: 'var(--color-brand-deep)', fontWeight: 600 }}>Salidas:</span>
+              <span style={{ color: 'var(--color-brand-deep-text)', fontWeight: 600 }}>Salidas:</span>
               <strong style={{ fontFamily: 'monospace' }}>{hoveredPoint.salidas.toLocaleString('es-PE')} unid</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', borderTop: '1px dashed var(--color-border)', paddingTop: '3px', marginTop: '3px' }}>

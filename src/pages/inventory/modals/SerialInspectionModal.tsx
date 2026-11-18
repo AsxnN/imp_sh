@@ -52,7 +52,7 @@ export function SerialInspectionModal({
             }}
           >
             <p className="muted" style={{ margin: '0 0 12px' }}>
-              No hay unidades físicas serializadas enroladas con RFID para este producto en este almacén.
+              No hay equipos registrados de este producto en este almacén.
             </p>
             <button
               type="button"
@@ -62,7 +62,7 @@ export function SerialInspectionModal({
                 onClose()
               }}
             >
-              + Enrolar primer equipo con chip RFID
+              + Registrar primer equipo
             </button>
           </div>
         ) : (
@@ -70,35 +70,18 @@ export function SerialInspectionModal({
             <table>
               <thead>
                 <tr>
-                  <th>Número de serie de fábrica</th>
-                  <th>Tag RFID asignado</th>
-                  <th>Estado operativo</th>
+                  <th>Número de serie</th>
+                  <th>Estado</th>
                   <th>Fecha de ingreso</th>
                   <th style={{ textAlign: 'center' }}>Acción</th>
                 </tr>
               </thead>
               <tbody>
                 {inspectProd.units.map((u) => {
-                  const tagUid = u.etiqueta_rfid?.uid_tag || 'Sin Tag'
                   return (
                     <tr key={u.id_unidad}>
                       <td>
-                        <strong style={{ color: 'var(--color-brand-deep)' }}>{u.numero_serie}</strong>
-                      </td>
-                      <td>
-                        <span
-                          style={{
-                            fontFamily: 'monospace',
-                            fontWeight: 700,
-                            background: 'var(--color-brand-soft)',
-                            color: 'var(--color-brand)',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '0.84rem'
-                          }}
-                        >
-                          Tag: {tagUid}
-                        </span>
+                        <strong>{u.numero_serie}</strong>
                       </td>
                       <td>
                         <span
@@ -116,7 +99,7 @@ export function SerialInspectionModal({
                             }`
                           }}
                         >
-                          {u.estado}
+                          {u.estado === 'DISPONIBLE' ? 'Disponible' : u.estado === 'EN_MANTENIMIENTO' ? 'En mantenimiento' : u.estado}
                         </span>
                       </td>
                       <td style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)' }}>
@@ -153,7 +136,7 @@ export function SerialInspectionModal({
               onClose()
             }}
           >
-            + Enrolar otro equipo
+            + Registrar otro equipo
           </button>
         </div>
       </div>

@@ -77,7 +77,7 @@ export function WarehouseCapacityChart({ warehouses, onSelectWarehouse }: Props)
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep)' }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '16px', color: 'var(--color-brand-deep-text)' }}>
               Ocupación y estiba por almacén
             </h2>
             <span

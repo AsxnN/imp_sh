@@ -286,7 +286,7 @@ export function AddCustomColumnModal({
                       background: '#F1F5F9',
                       padding: '2px 6px',
                       borderRadius: '4px',
-                      color: 'var(--color-brand-deep)'
+                      color: 'var(--color-brand-deep-text)'
                     }}
                   >
                     {preset.formula}
@@ -513,7 +513,7 @@ export function AddCustomColumnModal({
                             padding: '6px 10px',
                             textAlign: 'right',
                             fontWeight: 700,
-                            color: 'var(--color-brand-deep)',
+                            color: 'var(--color-brand-deep-text)',
                             background: 'var(--color-brand-soft)'
                           }}
                         >

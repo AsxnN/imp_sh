@@ -100,7 +100,7 @@ export function KpiDeltaCard({
             fontFamily: 'var(--font-display)',
             fontSize: '24px',
             fontWeight: 700,
-            color: 'var(--color-brand-deep)',
+            color: 'var(--color-brand-deep-text)',
             letterSpacing: '-0.02em',
             lineHeight: 1.1
           }}

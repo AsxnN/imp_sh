@@ -203,7 +203,7 @@ export default function App() {
                 type="button"
                 className={`sidebar-nav-item ${section === 'recepciones' ? 'active' : ''}`}
                 onClick={() => setSection('recepciones')}
-                title="Recepciones RFID: Descarga en muelle, asignación de tags y conciliación ciega"
+                title="Recepciones RFID: Descarga en Operaciones, asignación de tags y conciliación ciega"
               >
                 <span className="sidebar-nav-icon">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -377,7 +377,7 @@ export default function App() {
           {section === 'productos' ? (
             <ProductsPage onBack={() => setSection('dashboard')} />
           ) : section === 'inventario' ? (
-            <InventoryPage onBack={() => setSection('dashboard')} />
+            <InventoryPage onBack={() => setSection('dashboard')} onGoToMovements={() => setSection('movimientos')} />
           ) : section === 'movimientos' ? (
             <MovementsPage onBack={() => setSection('dashboard')} />
           ) : section === 'recepciones' ? (
@@ -385,6 +385,7 @@ export default function App() {
               onBack={() => setSection('dashboard')}
               onNavigateToInventory={() => setSection('inventario')}
               initialContainerId={targetContainerForReception}
+              onGoToOrders={() => setSection('ordenes')}
             />
           ) : section === 'auditorias' ? (
             <AuditsPage onBack={() => setSection('dashboard')} />
